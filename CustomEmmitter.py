@@ -15,15 +15,15 @@ Add physically realistic timing (delays per element).
 Incorporate transducer geometry and directionality.
 
 '''
-class CustomEmitter(mi.Emmiter):
+class UltraRayEmitter(mi.Emitter):
 
     def __init__(self, props):
         mi.Emmiter.__init__(self, props)
 
         #Defining the emmiter perameters base cases
         self.num_elements = props.get('num_elements', 128)
-        self.element_width = props.get('element_width', 0.0003) #Meters
-        self.element_height = props.get('element_height', 0.01) #Meters
+        self.width = props.get('element_width', 0.0003) #Meters
+        self.height = props.get('element_height', 0.01) #Meters
         self.pitch = props.get('pitch', 0.00035) #meters - center to center spacing
         self.radius = props.get('radius', 0.0) #meters - set to 0 for linear array
 
@@ -216,8 +216,8 @@ class CustomEmitter(mi.Emmiter):
         angles_deg_str = [np.degrees(angle) for angle in self.plane_wave_angles_rad_py]
         return (f"CustomEmitter[\n"
                 f"  num_elements = {self.num_elements},\n"
-                f"  element_width = {self.element_width:.4g},\n"
-                f"  element_height = {self.element_height:.4g},\n"
+                f"  element_width = {self.width:.4g},\n"
+                f"  element_height = {self.height:.4g},\n"
                 f"  pitch = {self.pitch:.4g},\n"
                 f"  radius = {self.radius:.4g},\n"
                 f"  plane_wave_angles_deg = {angles_deg_str},\n"
@@ -229,8 +229,7 @@ class CustomEmitter(mi.Emmiter):
                 f"]")
 
 #Registration format from API docs
-mi.register_emitter("ultraray_emitter", lambda props: CustomEmitter(props))
-
+mi.register_emitter("ultra_ray_emitter", lambda props: UltraRayEmitter(props))
 
 
 
