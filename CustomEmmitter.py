@@ -1,123 +1,114 @@
 import drjit as dr
 import mitsuba as mi
+import math
 
 class UltraRayEmitter(mi.Emitter):
     def __init__(self, props):
         super().__init__(props)
 
-        #Transducer Geometry default values
+        # Transducer geometry parameters
         self.num_elements_lateral = props.get("num_elements_lateral", 128)
-        self.elements_width = props.get("elements_width", 0.003) #0.3mm
-        self.elements_height = props.get("elements_height", 0.01) #0.1mm
-        self.pitch = props.get("pitch", 0.00035) #0.35mm
-        self.radius =props.get("radius", dr.inf) #Default is linear which has infinite radius
+        self.elements_width = props.get("elements_width", 0.003)
+        self.elements_height = props.get("elements_height", 0.01)
+        self.pitch = props.get("pitch", 0.00035)
+        self.radius = props.get("radius", dr.inf)
 
-        #Emmission properties
-        self.speed_of_sound = props.get("speed_of_sound", 1540) #m/s
-
-        #Lower frequencies go deeper into the material but high frequency give better resolution
-        self.center_frequency = props.get("center_frequency", 5e6) #5MHz
-
-        # Base emitted pressure/intensity per ray, scaled by directivity
+        # Emission properties
+        self.speed_of_sound = props.get("speed_of_sound", 1540)
+        self.center_frequency = props.get("center_frequency", 5e6)
         self.intensity = props.get("intensity", mi.Color3f(1.0))
 
-        #Plane wave imaging parameters
-        raw_input_angles = props.get('plane_wave_angles_degrees', [0.0])
+        # Handle angles
+        raw_angles = props.get("plane_wave_angles_degrees", [0.0])
+        if isinstance(raw_angles, (int, float)):
+            raw_angles = [float(raw_angles)]
+        elif isinstance(raw_angles, tuple):
+            raw_angles = list(raw_angles)
 
-        plane_wave_angles = []
-        if not isinstance(raw_input_angles, list):
-            for angles in raw_input_angles:
-                plane_wave_angles.append(float(angles))
-
-        #Convert the angles into drjit compatible floats
-        self.plane_wave_angles_rad = dr.zeros(mi.Float, len(plane_wave_angles))
-        for i, angle_deg in enumerate(plane_wave_angles):
+        self.plane_wave_angles_rad = dr.zeros(mi.Float, len(raw_angles))
+        for i, angle_deg in enumerate(raw_angles):
             self.plane_wave_angles_rad[i] = float(angle_deg) * dr.pi / 180.0
         self.num_plane_wave_angles = len(self.plane_wave_angles_rad)
 
-        #Emmiter transformations set in Scene
+        # Scene transformation
         self.to_world = props.get("to_world", mi.ScalarTransform4f())
 
-
-        #Element Positions in Local Transducer space
-        #assuming 1D linear array centered at x = 0 and transducer surface is at z=0 emitting towards positive z
-
+        # Element positions and normals
         self.element_position_x = dr.zeros(mi.Float, self.num_elements_lateral)
-        if self.num_elements_lateral > 1:
-            total_width_array = (self.num_elements_lateral -1 ) * self.pitch
+        self.element_position_z = dr.zeros(mi.Float, self.num_elements_lateral)
+        self.element_normals = [mi.Vector3f(0, 0, 1)] * self.num_elements_lateral
+
+        if math.isinf(self.radius):  # Linear array
+            total_width_array = (self.num_elements_lateral - 1) * self.pitch
             start_x = -total_width_array / 2
-            # dr.arrange can create a sequence, useful if pitch is also an array for some reason
-            self.element_position_x = start_x + dr.arange(mi.float, self.num_elements_lateral) * self.pitch
+            self.element_position_x = start_x + dr.arange(mi.Float, self.num_elements_lateral) * self.pitch
+            self.element_position_z = dr.zeros(mi.Float, self.num_elements_lateral)
+            self.element_normals = [mi.Vector3f(0, 0, 1)] * self.num_elements_lateral
+        else:  # Convex array
+            theta = (dr.arange(mi.Float, self.num_elements_lateral) - self.num_elements_lateral / 2) * (self.pitch / self.radius)
+            self.element_position_x = self.radius * dr.sin(theta)
+            self.element_position_z = self.radius * (1 - dr.cos(theta))
+            self.element_normals = [mi.Vector3f(dr.cos(t), 0.0, dr.sin(t)) for t in theta]
 
-        else: #Single element at origin
-            self.element_position_x[0] = 0.0
-
-        #The normal vector for each element is in the positive z direction
-        self.element_normal_local = mi.Vector3f(0, 0, 1)
-
-        #Mitsuba Emitter Flags describes the type of emitter to Mitsuba for potential optimizations
-        # mi.EmitterFlags.Surface emits from a surface
-        # mi.EmitterFlags.SpatiallyVarying emission characteristics can change over the surface
+        # Flags and ID
         self.m_flags = mi.EmitterFlags.Surface | mi.EmitterFlags.SpatiallyVarying
-
-        #debugging tool to store ID
         self.m_id = props.id()
 
+    def sample_ray(self, time, sample1, sample2, sample3, active=True):
+        # Sample wavelength
+        wavelengths, spec_weight = mi.sample_rgb_spectrum(sample1)
 
-        #Spawning the rays
-    def sample_ray(self, time, wavelength_sample, sample1, sample2, active=True):
+        # Element and angle selection
+        element_index = dr.minimum(dr.floor(sample2.x * self.num_elements_lateral), self.num_elements_lateral - 1)
+        angle_index = dr.minimum(dr.floor(sample3.y * self.num_plane_wave_angles), self.num_plane_wave_angles - 1)
+        steering_angle = dr.gather(mi.Float, self.plane_wave_angles_rad, angle_index)
 
-        #pick a randome transducer element
-        element_index = dr.minimum(dr.floor(sample1 * self.num_elements_lateral), self.num_elements_lateral - 1)
+        # Random offsets on element surface
+        offset_x = (sample2.y - 0.5) * self.elements_width
+        offset_y = (sample3.x - 0.5) * self.elements_height
 
-        #Select a plane wave steering angle (positive tilt rigth and negative tilt left)
-        angle_index = dr.minimum(dr.floor(sample2.x * self.num_plane_wave_angles), self.num_plane_wave_angles - 1)
-        steering_angle = dr.gather(mi.float, self.plane_wave_angles_rad, angle_index)
+        x_e = dr.gather(mi.Float, self.element_position_x, element_index)
+        z_e = dr.gather(mi.Float, self.element_position_z, element_index)
+        origin_local = mi.Point3f(x_e + offset_x, offset_y, z_e)
 
-        #compute the origin (x, y, z)
-        origin_local = mi.Point3f(dr.gather(mi.Float, self.element_position_x, element_index), 0, 0)
+        # Steering direction in xz plane
+        direction_local = mi.Vector3f(dr.sin(steering_angle), 0, dr.cos(steering_angle))
 
-        #Compute the direction
-        direction_local = mi.Vector3f(dr.sin(steering_angle), 0, dr.cos(steering_angle)) #steering in the xz plane
+        # Element normal
+        normal_local = self.element_normals[element_index]
 
-        #Transfrom both to world and space
+        # Transform to world
         origin_world = self.to_world @ origin_local
-        #Normalize direction
         direction_world = dr.normalize(self.to_world @ direction_local)
 
-        #Emmission directivity fd = (omega dot n)
-        cos_theta = dr.dot(direction_local, self.element_normal_local)
-        directivity_weight = (dr.maximum(cos_theta, 0.0))#there is no negative weight
+        # Directivity
+        cos_theta = dr.maximum(dr.dot(direction_local, normal_local), 0.0)
+        directivity_weight = (1.0 / self.num_elements_lateral) * cos_theta
 
-        #normalizing 1/N
-        normalized_directivity = 1 / self.num_elements_lateral
-
-        #weighted directivity
-        weighted_directivity = normalized_directivity * directivity_weight
-
-
-        #Emmission Time Delay for ray timing te based on steering angle
-        #xe is the lateral position of the elment, steering angle theta, speec of sound c
-        x_e = dr.gather(mi.Float, self.element_position_x, element_index)
+        # Time delay
         delay_time = -(x_e * dr.sin(steering_angle)) / self.speed_of_sound
 
-        #Create ray
-        ray = mi.Ray(o=origin_world, d=direction_world, time=time + delay_time, wavelength=wavelength_sample)
+        # Final ray
+        ray = mi.RayDifferential3f(
+            o=origin_world,
+            d=direction_world,
+            time=time + delay_time,
+            wavelengths=wavelengths
+        )
 
-        return ray, weighted_directivity
+        # Return ray, weighted spectrum, and activity mask
+        spectrum = self.intensity * directivity_weight * spec_weight
+        return ray, spectrum, active
 
+    def traverse(self, callback):
+        callback.put_parameter("intensity", self.intensity)
+        callback.put_parameter("to_world", self.to_world)
 
+    def parameters_changed(self):
+        pass
 
+    def flags(self):
+        return self.m_flags
 
-
-
-
-
-
-
-
-
-
-
-
-
+    def id(self):
+        return self.m_id
