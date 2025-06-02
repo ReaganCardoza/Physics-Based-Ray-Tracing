@@ -112,3 +112,5 @@ class UltraRayEmitter(mi.Emitter):
 
     def id(self):
         return self.m_id
+
+mi.registry.register_emitter("UltraRayEmitter", lambda props: UltraRayEmitter(props))
