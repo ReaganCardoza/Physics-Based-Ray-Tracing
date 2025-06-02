@@ -2,6 +2,8 @@ import drjit as dr
 import mitsuba as mi
 import math
 
+mi.set_variant("cuda_ad_rgb")
+
 class UltraRayEmitter(mi.Emitter):
     def __init__(self, props):
         super().__init__(props)
@@ -112,3 +114,5 @@ class UltraRayEmitter(mi.Emitter):
 
     def id(self):
         return self.m_id
+
+
