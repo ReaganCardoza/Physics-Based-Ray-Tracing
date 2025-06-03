@@ -1,96 +1,92 @@
 import mitsuba as mi
 import drjit as dr
 
-mi.set_variant('llvm_ad_rgb')
+mi.set_variant("cuda_ad_rgb")
 
 class UltraSensor(mi.Sensor):
     def __init__(self, props):
         super().__init__(props)
 
-        # Sensor Type
-        self.type = 'distant'
+        # m_film property
 
-        # Sensor origin default location
-        self.o_x = 0
-        self.o_y = 0
-        self.o_z = 0
+        # m_needs_sample_2
 
-        # Sensor default location
-        self.r_x = 0
-        self.r_y = 0
-        self.r_z = 0
+        # m_needs_sample_3
 
-        # Sensor default orientation
-        self.n_x = 0
-        self.n_y = 0
-        self.n_z = 0 
+    def eval(self, si, active=True):
+        #Given a ray-surface intersection, return the emitted radiance or importance traveling along the reverse direction
+        radiance =mi.Color3f(0.0)
+        return radiance
 
-        # Scene Transform
-        self.to_world = mi.ScalarTransform4f().look_at(
-                origin=[self.o_x, self.o_y, self.o_z],
-                target=[self.r_x, self.r_y, self.r_z],
-                up=[0,0,1]
-            )
-        
-        # Target
-        self.target = [self.n_x, self.n_y, self.n_z]
-
-        # Filter
-        filter_dict = {
-            'type' : 'tent',
-            'radius': 0.5,
-        }
-
-        # Film
-        film_dict = {
-            'type':'hdrfilm',
-            'width': 1,
-            'height': 1,
-            'filter': filter_dict
-        }
-
- 
-
-        # Internal Definition of the Sensor, Film
-        self._internal = mi.load_dict({
-            # Sensor 
-            'type' : self.type,
-            'to_world' : self.to_world,
-            'target' : self.target,
-
-            # Film 
-            'film': film_dict
-            
-
-
-        })
-
-        
-
-    # Change Sensor Origin
-    def translate_origin(self, new_o_x, new_o_y, new_o_z):
-        self.o_x = new_o_x
-        self.o_y = new_o_y
-        self.o_z = new_o_z
-
-    # Moves the sensor to a different location
-    def translate_sensor(self, new_r_x, new_r_y, new_r_z):
-        self.r_x = new_r_x
-        self.r_y = new_r_y
-        self.r_z = new_r_z
-
-    # Rotates the sensor
-    def rotate_sensor(self, new_n_x, new_n_y, new_n_z):
-        self.n_x = new_n_x
-        self.n_y = new_n_y
-        self.n_z = new_n_z
-
-    #### FILL THESE OUT!!!!
-    def sample_ray(self, time, wavelength_samples, sample2, sample3, reparam, active=True):
-        return self._internal.sample_ray(time, wavelength_samples, sample2, sample3, reparam, active)
+    def eval_direction(self, it, ds, active=True):
+        #Re-evaluate the incident direct radiance/importance of the sample_direction() method.
+        radiance = mi.Color3f(0.0)
+        return radiance
     
-    def pdf_ray(self, ray, active=True):
-        return self._internal.pdf_ray(ray, active)
+    def film():
+        # m_needs_sample_2
+        return 0 
+    
+
+    def get_shape():
+        # Returns the shape which the emitter is currently attached
+        return mi.Shape()
+    
+    def needs_aperture_sample():
+        # Does the sampling technique require a sample for the aperture position?
+        return True
+    
+    def pdf_direction(self, it, ds, active=True):
+        # Evaluate the probability density of the direct sampling method implemented by the sample_direction() method.
+        pdf_dir = dr.llvm.ad.Float(0.0)
+        return pdf_dir
+    
+    def pdf_position(self, ps, active=True):
+        # Evaluate the probability density of the position sampling method implemented by sample_position().
+        pdf_pos = dr.llvm.ad.Float(0.0)
+        return pdf_pos
+
+    def sample_direction(Self, it, sample, active=True):
+        # Given a reference point in the scene, sample a direction from the reference point towards the endpoint (ideally proportional to the emission/sensitivity profile)
+        spl_dir = (mi.DirectionSample3f, mi.Color3f)
+        return spl_dir
+
+    def sample_position(self, time, sample, active=True):
+        # Importance sample the spatial component of the emission or importance profile of the endpoint.
+        spl_pos = (mi.PositionSample3f, dr.llvm.ad.Float)
+        return spl_pos
+    
+    def sample_ray(self, time, sample1, sample2, sample3, active=True):
+        # Importance sample a ray proportional to the endpoint’s sensitivity/emission profile.
+        spl_ray = (mi.Ray3f, mi.Color3f)
+        return spl_ray
+    
+    def sample_ray_differential(self, time, sample1, sample2, sample3, active=True):
+        # Importance sample a ray differential proportional to the sensor’s sensitivity profile.
+        spl_ray_d = (mi.RayDifferential3f, mi.Color3f)
+        return spl_ray_d
+    
+    def sample_wavelengths(self, si, sample, active=True):
+        # Importance sample a set of wavelengths according to the endpoint’s sensitivity/emission spectrum.
+        spl_wave = (mi.Color0f, mi.Color3f)
+        return spl_wave
+    
+    def sampler():
+        # Return the sensor’s sample generator
+        return mi.Sampler
+    
+    def shutter_open()
+        # Return the time value of the shutter opening event
+        shutter_time = float()
+        return shutter_time
+    
+    def shutter_open_time()
+        # Return the length, for which the shutter remains open
+        shutter_length = float()
+        return shutter_length
+
+    
 
 
-        
+
+
