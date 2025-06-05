@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 from CustomEmmitter import UltraRayEmitter
 from CustomSensor import UltraSensor
 
-mi.set_variant('llvm_ad_rgb')
+mi.set_variant("cuda_ad_rgb")
 
 mi.register_emitter("UltraRayEmitter", lambda props: UltraRayEmitter(props))
 mi.register_sensor("UltraSensor", lambda props: UltraSensor(props))
@@ -34,8 +34,10 @@ scene = mi.load_dict({
         'type' : 'sphere',
     },
     'sensor': USSensor,
-    'emitter': USEmitter
     }
 ) 
 
-image = mi.render(scene)
+params = mi.traverse(scene)
+print(params)
+
+#image = mi.render(scene)
