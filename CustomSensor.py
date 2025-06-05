@@ -19,6 +19,7 @@ class UltraSensor(mi.Sensor):
         # For reception sensitivity
         self.directivity = props.get('directivity', 1.0)
 
+    '''
     def sample_ray(self, time, wavelength_sample, position_sample, aperture_sample, active=True):
         # Store emission time for phase reference
         self.emission_time = time
@@ -35,6 +36,20 @@ class UltraSensor(mi.Sensor):
         weight = mi.Spectrum(dr.cos(phase), dr.sin(phase), 0.0)
 
         return mi.Ray3f(origin, direction), weight
+    '''
+    
+    def sample_ray(self, time, wavelength_sample, position_sample, aperture_sample, active=True):
+        # Simple perspective rays pointing toward sphere
+        origin = mi.Point3f(0, 0, 3)  # Fixed position behind sphere
+        
+        # Map position_sample to image plane
+        x = (position_sample.x - 0.5) * 2  # [-1, 1]
+        y = (position_sample.y - 0.5) * 2  # [-1, 1]
+        direction = dr.normalize(mi.Vector3f(x, y, -1))  # Point toward -Z
+        
+        weight = mi.Spectrum(1.0, 0.0, 0.0)
+        return mi.Ray3f(origin, direction), weight
+
     
     def sample_direction(self, it, sample, active=True):
         # Reception phase calculation (echo detection)

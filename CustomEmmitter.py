@@ -27,10 +27,9 @@ class UltraRayEmitter(mi.Emitter):
         elif isinstance(raw_angles, tuple):
             raw_angles = list(raw_angles)
 
-        self.plane_wave_angles_rad = dr.zeros(mi.Float, len(raw_angles))
-        for i, angle_deg in enumerate(raw_angles):
-            self.plane_wave_angles_rad[i] = float(angle_deg) * dr.pi / 180.0
-        self.num_plane_wave_angles = len(self.plane_wave_angles_rad)
+        # Convert Python list to Dr.Jit array using mi.Float constructor
+        self.plane_wave_angles_rad = mi.Float(raw_angles) * dr.pi / 180.0
+        self.num_plane_wave_angles = len(raw_angles)
 
         # Scene transformation
         self.to_world = props.get("to_world", mi.ScalarTransform4f())
