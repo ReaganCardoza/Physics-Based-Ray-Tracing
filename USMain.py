@@ -55,10 +55,6 @@ scene_dict = {
             'type': 'diffuse',
             'reflectance': {'type': 'rgb', 'value': [0.7, 0.1, 0.1]}
         }
-    },
-    'emitter': {
-        'type': 'constant',
-        'radiance': {'type': 'rgb', 'value': [1.0, 1.0, 1.0]}
     }
 }
 
