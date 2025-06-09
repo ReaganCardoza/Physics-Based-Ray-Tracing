@@ -36,7 +36,7 @@ scene_dict = {
         }
     },
     'emitter': {
-        'type': 'ultra_emitter',
+        'type': 'ultrasound_emitter',
         'num_elements_lateral': 128,
         'radius': float('inf'),  # Linear array
         'plane_wave_angles_degrees': [-10, -5, 0, 5, 10],
@@ -55,7 +55,7 @@ scene_dict = {
             'type': 'diffuse',
             'reflectance': {'type': 'rgb', 'value': [0.7, 0.1, 0.1]}
         }
-    }
+    },
 }
 
 scene = mi.load_dict(scene_dict)
