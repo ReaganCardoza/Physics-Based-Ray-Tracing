@@ -1,7 +1,8 @@
 import mitsuba as mi
+import drjit as dr
 import matplotlib.pyplot as plt
 
-mi.set_variant('llvm_ad_rgb')  # or 'cuda_ad_rgb' if you have CUDA
+mi.set_variant('cuda_ad_rgb')  # or 'cuda_ad_rgb' if you have CUDA
 
 from CustomIntegrator import UltraIntegrator
 mi.register_integrator("ultrasound_integrator", UltraIntegrator)
@@ -15,13 +16,19 @@ mi.register_emitter('ultrasound_emitter', UltraRayEmitter)
 scene_dict = {
     'type': 'scene',
     'integrator': {
-        'type': 'ultrasound_integrator',  # Standard Mitsuba path tracer
+        'type': 'ultrasound_integrator',
         'max_depth': 2
     },
-    'sensor': {
+        'sensor': {
         'type': 'ultrasound_sensor',
-        'frequency': 5e6,
-        'elements': 128,
+        'num_elements_lateral': 128,
+        'elements_width': 0.003,
+        'elements_height': 0.01,
+        'pitch': 0.00035,
+        'radius': float('inf'),  # Linear array
+        'center_frequency': 5e6,
+        'sound_speed': 1540,
+        'directivity': 1.0,
         'to_world': mi.ScalarTransform4f().look_at(
             origin=[0, 0, 2],
             target=[0, 0, 0],
@@ -60,19 +67,29 @@ scene_dict = {
 
 scene = mi.load_dict(scene_dict)
 image = mi.render(scene)
-mi.Bitmap(image).write('basic_test.exr')
+real_part = image[:,:,0]  # All the result_real values arranged in 2D
+imag_part = image[:,:,1]  # All the result_imag values arranged in 2D  
+magnitude = image[:,:,2]  # All the magnitude values arranged in 2D
 
-print("Rendered image shape:", image.shape)
+# Now magnitude will have your ultrasound data!
+print("Magnitude range:", dr.min(magnitude), "to", dr.max(magnitude))
 
-if hasattr(image, 'numpy'):
-    image_np = image.numpy()
+# Calculate magnitude properly
+magnitude = dr.sqrt(real_part**2 + imag_part**2)
+print("Magnitude range:", dr.min(magnitude), "to", dr.max(magnitude))
+
+# Check for valid data
+if dr.max(magnitude) > 0:
+    # Apply ultrasound visualization
+    magnitude_db = 20 * (dr.log(dr.maximum(magnitude, 1e-6)) / math.log(10))
+    
+    # Normalize to [0,1] for display
+    display_image = (magnitude_db - dr.min(magnitude_db)) / (dr.max(magnitude_db) - dr.min(magnitude_db))
+    
+    plt.figure(figsize=(6, 6))
+    plt.imshow(display_image.numpy().clip(0, 1), cmap='gray')
+    plt.title('Ultrasound Simulation')
+    plt.axis('off')
+    plt.show()
 else:
-    # If image is a Bitmap, convert to numpy
-    image_np = mi.Bitmap(image).convert(mi.Bitmap.PixelFormat.RGB, mi.Struct.Type.Float32).numpy()
-
-# Clip values for display and show with matplotlib
-plt.figure(figsize=(6, 6))
-plt.imshow(image_np.clip(0, 1))
-plt.title('Rendered Mitsuba Image')
-plt.axis('off')
-plt.show()
+    print("No ultrasound data found")

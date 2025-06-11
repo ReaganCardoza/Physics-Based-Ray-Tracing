@@ -113,5 +113,3 @@ class UltraRayEmitter(mi.Emitter):
 
     def id(self):
         return self.m_id
-
-
