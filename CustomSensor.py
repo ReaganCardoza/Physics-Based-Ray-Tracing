@@ -1,7 +1,7 @@
 import mitsuba as mi
 import drjit as dr
 
-mi.set_variant('cuda_ad_rgb')
+mi.set_variant("cuda_ad_mono")
 
 class UltraSensor(mi.Sensor):
     def __init__(self, props):
@@ -82,12 +82,6 @@ class UltraSensor(mi.Sensor):
         cos_beam_angle = direction_local.z
         directivity_weight = dr.abs(cos_beam_angle) * self.directivity
 
-        # Complex weight
-        weight = mi.Spectrum(
-            dr.cos(phase) * directivity_weight,
-            dr.sin(phase) * directivity_weight,
-            0.0
-        )
-
-
+        
+        weight = dr.cos(2 * dr.pi * self.center_frequency * time) * directivity_weight
         return mi.Ray3f(origin_world, direction_world), weight

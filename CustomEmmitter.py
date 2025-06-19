@@ -2,7 +2,7 @@ import drjit as dr
 import mitsuba as mi
 import math
 
-mi.set_variant("cuda_ad_rgb")
+mi.set_variant("cuda_ad_mono")
 
 class UltraRayEmitter(mi.Emitter):
     def __init__(self, props):
