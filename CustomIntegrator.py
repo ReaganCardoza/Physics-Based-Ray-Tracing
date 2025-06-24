@@ -12,7 +12,8 @@ class UltraIntegrator(mi.SamplingIntegrator):
         self.sound_speed = props.get('sound_speed', 1540) # m/s
         self.attenuation = props.get('attenuation', 0.5) # dB/cm/MHz
         self.wave_cycles = props.get('wave_cycles', 5)
-        self.cutoff_angle = props.get("cutoff_angle", 10) # deg
+        self.main_beam_angle = props.get("main_beam_angle", 5) # deg
+        self.cutoff_angle = props.get("cutoff_angle", 120) # deg
         self.fs = props.get('sampling_rate', 50e6) # Hz
 
         # Transducer geometry
@@ -39,6 +40,8 @@ class UltraIntegrator(mi.SamplingIntegrator):
         # House keeping list for post-p
         self.rx_counter = dr.zeros(mi.UInt32, self.n_angles * self.n_elements)
         
+
+
 
     
     def sample(self, scene, sampler, ray, medium, active=True):
@@ -76,6 +79,18 @@ class UltraIntegrator(mi.SamplingIntegrator):
         print("TX delays (us):", tx_delay.numpy() * 1e6)
         '''
 
+        # Helper function
+        def directivity_weight_i(wi, n, alpha_m, alpha_c):
+            # incoming angle
+            alpha = dr.abs(dr.acos(dr.dot(n, wi)))
+            dr.print(alpha_m)
+            dr.print(alpha)
+            dr.print(alpha_c)
+            mid_cond = (alpha_c - alpha) / (alpha_c - alpha_m)
+            return dr.select(alpha <= alpha_m, 1.0,
+                dr.select(alpha <= alpha_c, 
+                            mid_cond,
+                            0.0))
 
 
         # Symbolic while loop
@@ -110,7 +125,8 @@ class UltraIntegrator(mi.SamplingIntegrator):
 
             ### Scatter echo into channel buffer
             mask = active & visible
-            fd = dr.select(mask, 1.0, 0) #directivity weighting for now
+            fd = directivity_weight_i(sec_dir, si.sh_frame.n, dr.deg2rad(self.main_beam_angle), dr.deg2rad(self.cutoff_angle))
+            dr.print(fd)
 
             # Safegaurds
             total_time = dr.maximum(tx_delay + tof, 0.0) # non-negative time
