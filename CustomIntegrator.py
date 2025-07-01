@@ -1,32 +1,30 @@
 import mitsuba as mi
 import drjit as dr
 
-#mi.set_variant("cuda_ad_mono")
 
 class UltraIntegrator(mi.SamplingIntegrator):
     def __init__(self, props):
         super().__init__(props)
         # Scene independent ray tracing parameters
-        self.max_depth = props.get('max_depth', 2)      # One round trip
-        self.frequency = props.get('frequency', 5e6)    # Hz
-        self.sound_speed = props.get('sound_speed', 1540) # m/s
-        self.attenuation = props.get('attenuation', 0.5) # dB/cm/MHz
+        self.max_depth = props.get('max_depth', 2)
+        self.frequency = props.get('frequency', 5e6)
+        self.sound_speed = props.get('sound_speed', 1540)
+        self.attenuation = props.get('attenuation', 0.5)
         self.wave_cycles = props.get('wave_cycles', 5)
-        self.main_beam_angle = props.get("main_beam_angle", 5) # deg
-        self.cutoff_angle = props.get("cutoff_angle", 120) # deg
-        self.fs = props.get('sampling_rate', 50e6) # Hz
+        self.main_beam_angle = props.get("main_beam_angle", 5)
+        self.cutoff_angle = props.get("cutoff_angle", 120)
+        self.fs = props.get('sampling_rate', 50e6)
 
         # Transducer geometry
         self.n_elements = props.get('n_elements', 128)
         self.pitch = props.get('pitch', 0.00035)
-        self.elem_x = self.pitch * (dr.arange(mi.Float, self.n_elements) - (self.n_elements - 1)/2)
+        self.elem_x = self.pitch * (dr.arange(mi.Float, self.n_elements) - (self.n_elements - 1) / 2)
         self.elem_pos = mi.Vector3f(self.elem_x, 0, 0)
         self.trans_norm = mi.Vector3f(0, 0, 1)
 
         # Plane Wave transmission
-        self.angles = dr.linspace(mi.Float, -30, 30, 25) 
+        self.angles = props.get('angles', dr.linspace(mi.Float, -30, 30, 25))
         self.n_angles = len(self.angles)
-
 
         # Per ray initial state constants
         self.init_amp = 1.0
@@ -37,140 +35,137 @@ class UltraIntegrator(mi.SamplingIntegrator):
         self.time_samples = props.get('time_samples', 3000)
         self.channel_buf = dr.zeros(mi.Float, self.n_angles * self.n_elements * self.time_samples)
 
+        # New: Buffer to store initial transmission delays
+        self.transmission_delays_buf = dr.zeros(mi.Float, self.n_angles * self.n_elements)
+
         # House keeping list for post-p
         self.rx_counter = dr.zeros(mi.UInt32, self.n_angles * self.n_elements)
-        
 
-
-
-    
     def sample(self, scene, sampler, ray, medium, active=True):
+        return mi.Color1f(0.0), active, []
 
-        ray = mi.Ray3f(ray)
+    def simulate_acquisition(self, scene):
+        n_angles_scalar = int(self.n_angles)
+        n_elements_scalar = int(self.n_elements)
+        fs_scalar = float(self.fs)
+        c_scalar = float(self.sound_speed)
+        pitch_scalar = float(self.pitch)
+        time_samples_scalar = int(self.time_samples)
 
-        # Alias
-        n_elem = self.n_elements
-        n_angle = self.n_angles
-        fs = self.fs
-        c = self.sound_speed
+        self.channel_buf = dr.zeros(mi.Float, n_angles_scalar * n_elements_scalar * time_samples_scalar)
+        self.transmission_delays_buf = dr.zeros(mi.Float, n_angles_scalar * n_elements_scalar)
 
-        # Pre ray initial state
-        angle_id = mi.UInt32(dr.floor(sampler.next_1d() * self.n_angles))
-        elem_id  = mi.UInt32(dr.floor(sampler.next_1d() * self.n_elements))
-        angle_rad = (-30. + angle_id * (60. / (n_angle - 1))) * dr.pi / 180.0
-        x_elem = self.pitch * (mi.Float(elem_id) - (n_elem - 1) * 0.5)
-        tx_delay = (x_elem * dr.sin(angle_rad)) / c
+        for angle_idx_val in range(n_angles_scalar):
+            angle_id_outer = mi.UInt32(angle_idx_val)
+            angle_rad_outer = self.angles[angle_idx_val] * dr.pi / 180.0
 
-        # Running state
-        amp = mi.Color1f(self.init_amp)
-        atten = mi.Float(self.init_atten)
-        tof = mi.Float(self.init_tof)
-        geo_len = mi.Float(0.0)
-        depth = mi.UInt32(0)
+            for elem_idx_val in range(n_elements_scalar):
+                elem_id_outer = mi.UInt32(elem_idx_val)
+                x_elem_outer = pitch_scalar * (mi.Float(elem_id_outer) - (n_elements_scalar - 1) * 0.5)
 
-        ### Debugging
-        '''
-        print("Element positions (x):", self.elem_x.numpy())
-        print("Steering angles (deg):", self.angles.numpy())
-        origin = mi.Point3f(x_elem, 0, 0)
-        direction = mi.Vector3f(dr.sin(angle_rad), 0, dr.cos(angle_rad))
-        print("Ray origins:", origin.numpy())
-        print("Ray directions:", direction.numpy())
-        print("TX delays (us):", tx_delay.numpy() * 1e6)
-        '''
+                tx_delay_outer = mi.Float( (x_elem_outer * dr.sin(angle_rad_outer)) / c_scalar )
+                delay_flat_idx_outer = mi.UInt32(angle_id_outer * n_elements_scalar + elem_id_outer)
 
-        # Helper function
-        def directivity_weight_i(wi, n, alpha_m, alpha_c):
-            # incoming angle
-            alpha = dr.abs(dr.acos(dr.dot(n, wi)))
-            dr.print(alpha_m)
-            dr.print(alpha)
-            dr.print(alpha_c)
-            mid_cond = (alpha_c - alpha) / (alpha_c - alpha_m)
-            return dr.select(alpha <= alpha_m, 1.0,
-                dr.select(alpha <= alpha_c, 
-                            mid_cond,
-                            0.0))
+                dr.scatter(self.transmission_delays_buf, tx_delay_outer, delay_flat_idx_outer)
 
+                # --- REVERTED: Original ray tracing setup ---
+                origin = mi.Point3f(x_elem_outer, 0, 0) # Use outer variable
+                direction = mi.Vector3f(dr.sin(angle_rad_outer), 0, dr.cos(angle_rad_outer)) # Use outer variable
 
-        # Symbolic while loop
-        state = (amp, atten, tof, geo_len, depth, ray, active)
+                sensor_transform = scene.sensors()[0].transform
 
-        def cond(amp, atten, tof, geo_len, depth, ray, active):
-            return active
-        
-        def body(amp, atten, tof, geo_len, depth, ray, active):
-            ### Primary intersection
-            si = scene.ray_intersect(ray, active)
-            active &= si.is_valid()
-            distanace = dr.select(active, si.t, 0.0)
+                origin_world = sensor_transform @ origin
+                direction_world = dr.normalize(sensor_transform @ direction)
+                ray = mi.Ray3f(origin_world, direction_world)
 
-            ### Targeted secondary ray to random elemt
-            elem_off = (n_elem - 1) * 0.5
-            target = mi.Point3f(self.pitch * (mi.Float(elem_id) - elem_off), 0, 0)
-            sec_dir = dr.normalize(target - si.p)
-            vis_si = scene.ray_intersect(si.spawn_ray(sec_dir), active)
-            visible = vis_si.is_valid()
+                amp = mi.Color1f(self.init_amp)
+                atten = mi.Float(self.init_atten)
+                tof = mi.Float(self.init_tof)
+                geo_len = mi.Float(0.0)
+                depth = mi.UInt32(0)
+                active_ray = mi.Bool(True)
 
-            ### Attenuation, TOF and Phase
-            atten *= dr.exp(-self.attenuation * self.frequency * 1e-6 * distanace / 8.686)
-            tof += distanace / self.sound_speed
-            phase = 2 * dr.pi * self.frequency * tof
+                def directivity_weight_i(wi, n, alpha_m, alpha_c):
+                    trans_normal_world = dr.normalize(sensor_transform @ mi.Vector3f(0, 0, 1))
+                    alpha = dr.abs(dr.acos(dr.dot(trans_normal_world, wi)))
+                    mid_cond = (alpha_c - alpha) / (alpha_c - alpha_m)
+                    return dr.select(alpha <= alpha_m, 1.0,
+                                     dr.select(alpha <= alpha_c,
+                                               mid_cond,
+                                               0.0))
 
-            ### BSDF Interaction
-            ctx = mi.BSDFContext()
-            bsdf = si.bsdf()
-            bs, a_resp = bsdf.sample(ctx, si, sampler.next_1d(), sampler.next_1d(), active)
-            amp *= a_resp
+                state = (amp, atten, tof, geo_len, depth, ray, active_ray)
 
-            ### Scatter echo into channel buffer
-            mask = active & visible
-            fd = directivity_weight_i(sec_dir, si.sh_frame.n, dr.deg2rad(self.main_beam_angle), dr.deg2rad(self.cutoff_angle))
-            dr.print(fd)
+                def cond(amp, atten, tof, geo_len, depth, ray, active_ray):
+                    # Original condition for max_depth and path length
+                    return active_ray & (depth < self.max_depth) & (geo_len < 0.2)
 
-            # Safegaurds
-            total_time = dr.maximum(tx_delay + tof, 0.0) # non-negative time
+                def body(amp, atten, tof, geo_len, depth, ray, active_ray):
+                    ### Primary intersection
+                    si = scene.ray_intersect(ray, active_ray)
+                    active_ray &= si.is_valid()
+                    distance = dr.select(active_ray, si.t, 0.0)
 
-            # Clamped time index
-            t_idx = dr.round(total_time * fs)
-            t_idx = dr.clamp(t_idx, 0, self.time_samples - 1)
-            t_idx = mi.UInt32(t_idx)
+                    elem_off = (n_elements_scalar - 1) * 0.5
+                    target = mi.Point3f(pitch_scalar * (mi.Float(elem_id_outer) - elem_off), 0, 0)
+                    target_world = sensor_transform @ target
 
-            # Clamped flat index
-            channel_index = angle_id * n_elem + elem_id
-            flat = channel_index * self.time_samples + t_idx
-            max_flat = self.n_angles * self.n_elements * self.time_samples - 1
-            flat = dr.clamp(flat, 0, max_flat)
+                    sec_dir = dr.normalize(target_world - si.p)
+                    vis_si = scene.ray_intersect(si.spawn_ray(sec_dir), active_ray)
+                    visible = vis_si.is_valid() & active_ray
 
-            pressure_scalar = atten * amp * fd * dr.sin(phase)
-            dr.scatter_reduce(dr.ReduceOp.Add, self.channel_buf, pressure_scalar, flat, active=mask)
+                    atten_factor = dr.exp(-self.attenuation * self.frequency * 1e-6 * distance / 8.686)
+                    atten *= atten_factor
+                    tof += distance / c_scalar
+                    phase = 2 * dr.pi * self.frequency * tof
 
-            ### Spawn new rays
-            new_dir = si.to_world(bs.wo)
-            ray = si.spawn_ray(dr.normalize(new_dir))
+                    ctx = mi.BSDFContext()
+                    bsdf = si.bsdf()
+                    bs, a_resp = bsdf.sample(ctx, si, dr.full(mi.Float, 0.5), dr.full(mi.Float, 0.5), active_ray)
+                    amp *= a_resp
 
-            ### Stopping criteria
-            geo_len += distanace
-            depth += 1
+                    # REVERTED: Use original mask logic
+                    mask = active_ray & visible # Re-enable the 'visible' check
 
-            cos_min = dr.cos(dr.deg2rad(self.cutoff_angle))
-            within_angle = dr.dot(-ray.d, self.trans_norm) >= cos_min
-            path_ok = geo_len < 0.2
-            depth_ok = depth < self.max_depth
+                    fd = directivity_weight_i(sec_dir, si.sh_frame.n, dr.deg2rad(self.main_beam_angle),
+                                              dr.deg2rad(self.cutoff_angle))
+                    # REVERTED: Use original pressure_scalar
+                    pressure_scalar = atten * amp * fd * dr.sin(phase)
 
-            # Russian roulette
-            rr_prob = dr.minimum(dr.max(atten * amp), 0.95)
-            survive = (sampler.next_1d() < rr_prob) & active
+                    total_time = dr.maximum(tx_delay_outer + tof, 0.0)
+                    t_idx = dr.round(total_time * fs_scalar)
+                    t_idx = dr.clamp(t_idx, 0, time_samples_scalar - 1)
+                    t_idx = mi.UInt32(t_idx)
 
-            active &= within_angle & path_ok & depth_ok & survive
-            atten = dr.select(survive, atten / rr_prob, 0.0)
+                    channel_index_local = angle_id_outer * n_elements_scalar + elem_id_outer
+                    flat = channel_index_local * time_samples_scalar + t_idx
+                    max_flat = n_angles_scalar * n_elements_scalar * time_samples_scalar - 1
+                    flat = dr.clamp(flat, 0, max_flat)
 
+                    # REVERTED: Use original pressure_scalar and mask
+                    dr.scatter_reduce(dr.ReduceOp.Add, self.channel_buf, pressure_scalar, flat, active=mask)
 
-            return (amp, atten, tof, geo_len, depth, ray, active)
+                    new_dir = si.to_world(bs.wo)
+                    ray = si.spawn_ray(dr.normalize(new_dir))
 
+                    geo_len += distance
+                    depth += 1
 
-        amp, atten, tof, geo_len, depth, ray, active = dr.while_loop(state, cond, body)
+                    trans_norm_world = dr.normalize(sensor_transform @ mi.Vector3f(0, 0, 1))
+                    cos_min = dr.cos(dr.deg2rad(self.cutoff_angle))
+                    within_angle = dr.dot(-ray.d, trans_norm_world) >= cos_min
+                    path_ok = geo_len < 0.2
+                    depth_ok = depth < self.max_depth
 
-        return mi.Color1f(0.0), active, []    
+                    rr_prob = dr.minimum(dr.max(atten * amp), 0.95)
+                    survive = (mi.Float(0.5) < rr_prob) & active_ray
 
-        
+                    active_ray &= within_angle & path_ok & depth_ok & survive
+                    atten = dr.select(survive, atten / rr_prob, 0.0)
+
+                    return (amp, atten, tof, geo_len, depth, ray, active_ray)
+
+                amp, atten, tof, geo_len, depth, ray, active_ray = dr.while_loop(state, cond, body)
+
+        print(f"Simulation complete. Channel buffer populated. Transmission delays stored.")
+        return True
