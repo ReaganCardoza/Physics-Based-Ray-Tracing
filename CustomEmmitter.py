@@ -3,7 +3,7 @@ import mitsuba as mi
 import numpy as np
 import matplotlib.pyplot as plt
 
-mi.set_variant("llvm_ad_rgb")
+#mi.set_variant("llvm_ad_rgb")
 
 class CustomEmitter(mi.Emitter):
     def __init__(self, props):

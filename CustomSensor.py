@@ -1,7 +1,7 @@
 import mitsuba as mi
 import drjit as dr
 
-mi.set_variant("cuda_ad_mono")
+#mi.set_variant("cuda_ad_mono")
 
 class UltraSensor(mi.Sensor):
     def __init__(self, props):
