@@ -51,7 +51,7 @@ scene_dict = {
         'sound_speed': 1540,
         'directivity': 1.0,
         'to_world': mi.ScalarTransform4f().look_at(
-            origin=[0, 0, .05],
+            origin=[0, 0, 0.03],
             target=[0, 0, 0],
             up=[0, 1, 0]
         ),
@@ -69,7 +69,7 @@ scene_dict = {
         'radius': float('inf'),  # Linear array
         'central_frequency': 5e6,
         'to_world': mi.ScalarTransform4f().look_at(
-            origin=[0, 0, .05],
+            origin=[0, 0, 0.03],
             target=[0, 0, 0],
             up=[0, 1, 0]
         )
@@ -179,10 +179,11 @@ d_data = reader.data[0]
 print(beamformer)
 
 #Define a Scan Region of Interest
-x_min_scan = -20e-3
-x_max_scan = 20e-3
-z_min_scan = 5e-3
-z_max_scan = 50e-3
+x_min_scan = -0.04
+x_max_scan = 0.04
+z_min_scan = 0.001
+z_max_scan = 0.035
+
 
 wavelength = c / fc
 step_axial = wavelength / 4
@@ -218,17 +219,25 @@ display_image = (bmode_db_clipped - min_db) / dynamic_range
 
 depth_axis_mm = (np.arange(time_samples) / fs) * (c / 2) * 1e3
 
+
+display_image = display_image.T
+
+
+print("Shape of display_image:", display_image.shape)
+print("Expected shape: (len(z_scan), len(x_scan)) = ({}, {})".format(len(z_scan), len(x_scan)))
+
+
 #Plotting
 plt.figure(figsize=(10, 8))
 
 extent = [x_scan[0] * 1e3, x_scan[-1] * 1e3, z_scan[-1] * 1e3, z_scan[0] * 1e3]
 
 im = plt.imshow(display_image, extent=extent, cmap='gray', origin='upper', vmin=0, vmax=1)
-plt.xlabel('Axial (mm)')
-plt.ylabel('Depth (mm)')
+plt.xlabel('Lateral (mm)') # Corrected label
+plt.ylabel('Axial/Depth (mm)')   # Corrected label
 plt.title('Simulated Ultrasound B-mode Image')
 plt.colorbar(im, label='Relative Echo Intensity (Normalized)')
-plt.gca().invert_yaxis()
+plt.gca().invert_yaxis() # This is crucial to have depth increase downwards
 plt.tight_layout()
 plt.show()
 
