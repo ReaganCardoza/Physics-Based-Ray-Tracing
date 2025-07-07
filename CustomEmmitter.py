@@ -119,13 +119,13 @@ class CustomEmitter(mi.Emitter):
         return dr.full(ray.time, 1.0 / self.number_of_elements)
 
     def traverse(self, callback):
-        callback.put_parameter('number_of_elements', self.number_of_elements)
-        callback.put_parameter('pitch', self.pitch)
-        callback.put_parameter('radius', self.radius)
-        callback.put_parameter('opening_angle', self.opening_angle)
-        callback.put_parameter('steering_angle', self.steering_angle)
-        callback.put_parameter('speed_of_sound', self.speed_of_sound)
-        callback.put_parameter('central_frequency', self.central_frequency)
+        callback.put_parameter('number_of_elements', self.number_of_elements, mi.ParamFlags.Differentiable)
+        callback.put_parameter('pitch', self.pitch, mi.ParamFlags.Differentiable)
+        callback.put_parameter('radius', self.radius, mi.ParamFlags.Differentiable)
+        callback.put_parameter('opening_angle', self.opening_angle, mi.ParamFlags.Differentiable)
+        callback.put_parameter('steering_angle', self.steering_angle, mi.ParamFlags.Differentiable)
+        callback.put_parameter('speed_of_sound', self.speed_of_sound, mi.ParamFlags.Differentiable)
+        callback.put_parameter('central_frequency', self.central_frequency, mi.ParamFlags.Differentiable)
 
     def parameters_changed(self, keys):
         super().parameters_changed(keys)

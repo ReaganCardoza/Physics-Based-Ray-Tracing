@@ -1,16 +1,16 @@
 import mitsuba as mi
 import drjit as dr
 
-mi.set_variant("cuda_ad_mono")
+#mi.set_variant("cuda_ad_mono")
 
 class UltraBSDF(mi.BSDF):
     def __init__(self, props):
         super().__init__(props)
 
         # Get accoustic properties
-        self.impedance = 1.54
+        self.impedance = mi.Float(1.54)
         if props.has_property('impedance'):
-            self.impedance = props['impedance']
+            self.impedance = mi.Float(props['impedance'])
 
         self.roughness = 0.5
         if props.has_property('roughness'):

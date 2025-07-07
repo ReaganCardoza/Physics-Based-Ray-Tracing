@@ -2,6 +2,7 @@ import mitsuba as mi
 import drjit as dr
 
 
+
 class UltraIntegrator(mi.SamplingIntegrator):
     def __init__(self, props):
         super().__init__(props)
@@ -43,6 +44,9 @@ class UltraIntegrator(mi.SamplingIntegrator):
 
     def sample(self, scene, sampler, ray, medium, active=True):
         return mi.Color1f(0.0), active, []
+    
+    def traverse(self, callback):
+        pass
 
     def simulate_acquisition(self, scene):
         n_angles_scalar = int(self.n_angles)

@@ -31,6 +31,9 @@ class UltraSensor(mi.Sensor):
         # For reception sensitivity
         self.directivity = props.get('directivity', 1.0)
 
+
+
+
     def sample_ray(self, time, wavelength_sample, position_sample, aperture_sample, active=True):
         # Store emission time for phase reference
         self.emission_time = time
@@ -85,3 +88,6 @@ class UltraSensor(mi.Sensor):
         
         weight = dr.cos(2 * dr.pi * self.center_frequency * time) * directivity_weight
         return mi.Ray3f(origin_world, direction_world), weight
+
+    def traverse(self, callback):
+        pass
