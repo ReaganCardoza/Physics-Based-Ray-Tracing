@@ -1,7 +1,7 @@
 import mitsuba as mi
 import drjit as dr
 
-#mi.set_variant("cuda_ad_mono")
+mi.set_variant("cuda_ad_mono")
 
 class UltraBSDF(mi.BSDF):
     def __init__(self, props):
@@ -24,8 +24,67 @@ class UltraBSDF(mi.BSDF):
         self.m_components = [reflection_flags, transmission_flags]
         self.m_flags = reflection_flags | transmission_flags
 
-    def sample(self, ctx, si, sample1, sample2, active = True):
 
+    
+    def _ggx_sample(self, wi_world, n_world, sample):
+        # Local incident direction
+        frame = mi.Frame3f(n_world)
+        wi = frame.to_local(wi_world)
+        alpha = self.roughness
+
+        # Stretch view vector
+        wi_stretched = mi.Vector3f(alpha * wi.x, alpha * wi.y, wi.z)
+        wi_stretched = dr.normalize(wi_stretched)
+
+        # Orthoginal basis around wi stretched
+        inv_len = dr.rsqrt(dr.maximum(1.0 - wi_stretched.z * wi_stretched.z, 1e-7))
+        T1 = mi.Vector3f(wi_stretched.y * inv_len,
+                         -wi_stretched.x * inv_len,
+                         0.0)
+        T2 = dr.cross(wi_stretched, T1)
+
+        # Sample point on unit disk 
+        d = mi.warp.square_to_uniform_disk_concentric(sample)
+
+        # Stretching compensation
+        S = 0.5 * (1.0 + wi_stretched.z)
+        d.y = (1.0 - S) * dr.sqrt(dr.maximum(1.0 - d.x * d.x, 0.0)) + S * d.y
+
+        # Convert slopes to normal, then unstretch
+        m_stretched = d.x * T1 + d.y * T2 + dr.sqrt(dr.maximum(1.0 - d.x * d.x - d.y * d.y, 0.0)) * wi_stretched
+        m = mi.Vector3f(alpha * m_stretched.x,
+                        alpha * m_stretched.y,
+                        dr.maximum(m_stretched.z, 0.0))
+        m = dr.normalize(m)
+
+        # GGX NDF
+        cos_theta_m = m.z
+        alpha2 = alpha * alpha
+        denom = dr.maximum(cos_theta_m * cos_theta_m * ( alpha2 - 1.0) + 1.0, 1e-7)
+        D = alpha2 / (dr.pi * denom * denom)
+
+        # G1 for the incident direction
+        tan2_theta = dr.maximum(1.0 - wi.z*wi.z, 0.0) / dr.maximum(wi.z * wi.z, 1e-7)
+        G1_wi = 2.0/ (1.0 + dr.sqrt(1.0 + alpha2 * tan2_theta))
+
+        # Visable-normal pdf
+        pdf_m = G1_wi * dr.abs(dr.dot(wi, m)) * D / dr.maximum(wi.z, 1e-7)
+
+
+        return m, D, G1_wi, pdf_m
+    
+
+
+    def sample(self, ctx, si, sample1, sample2, active = True):
+        
+        # Directions and angles
+        incident_direction = si.wi
+        surface_normal = si.sh_frame.n
+
+
+        # Sample Micro facet normals
+
+        m, D, G1_wi, pdf_m = self._ggx_sample(si.wi, si.n, sample2)
 
         # Snells ratio
         entering = dr.dot(si.n, si.wi) > 0
@@ -35,9 +94,7 @@ class UltraBSDF(mi.BSDF):
 
         snells_ratio = Z1 / Z2
 
-        # Directions and angles
-        incident_direction = si.wi
-        surface_normal = si.sh_frame.n
+
 
         cosTr = dr.dot(surface_normal, -(incident_direction))
 
@@ -83,8 +140,8 @@ class UltraBSDF(mi.BSDF):
         acoustic_response = dr.select(select_reflect, Ar, At)
 
 
-        dr.print(cosTr)
-        dr.print(cosTt)
+        #dr.print(cosTr)
+        #dr.print(cosTt)
         
 
         return (bs, acoustic_response)
@@ -107,12 +164,4 @@ class UltraBSDF(mi.BSDF):
 
 
 
-class AcousticMedium(mi.Medium):
-    def __init__(self, props):
-        super.__init__(props)
 
-        self.impedance = props.get('impedance', 1.54) 
-        self.speed_of_sound = props.get('speed', 1540)
-
-    def traverse(self, callback):
-        callback.put_parameter('impedance', self.impedance, mi.ParamFlags.Differentiable)
