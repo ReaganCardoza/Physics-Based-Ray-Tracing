@@ -17,7 +17,7 @@ class CustomEmitter(mi.Emitter):
         self.steering_angle = dr.deg2rad(props.get('steering_angle', 0.0))
 
         #Ultrasound parameters
-        self.speed_of_sound = props.get('speed_of_sound', 1540) #speed of sound through tissue
+        self.speed_of_sound = mi.Float(props.get('speed_of_sound', 1540)) #speed of sound through tissue
         self.central_frequency = props.get('central_frequency', 5e6) #measured in Hz of the transmiting frequency
 
         #Controls

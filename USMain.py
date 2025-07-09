@@ -23,69 +23,70 @@ mi.register_emitter('ultrasound_emitter', CustomEmitter)
 from CustomBSDF import UltraBSDF
 mi.register_bsdf('ultrasound_bsdf', UltraBSDF)
 
-scene_dict = {
-    'type': 'scene',
-    'integrator': {
-        'type': 'ultrasound_integrator',
-        'max_depth': 3, # Keep at 1 for simpler debugging
-        'sampling_rate': 50e6,
-        'frequency': 5e6,
-        'sound_speed': 1540,
-        'attenuation': 0.5, # Keep at 0.0 for debugging signal strength
-        'wave_cycles': 5,
-        'main_beam_angle': 5,
-        'cutoff_angle': 180,
-        'n_elements': 64, # Keep low for faster debugging
-        'pitch': 0.00035,
-        'time_samples': 4000, # Keep large enough
-        'angles': dr.linspace(mi.Float, -10, 10, 5) # Keep low for faster debugging
-    },
-        'sensor': {
-        'type': 'ultrasound_sensor',
-        'num_elements_lateral': 128,
-        'elements_width': 0.003,
-        'elements_height': 0.01,
-        'pitch': 0.00035,
-        'radius': float('inf'),  # Linear array
-        'center_frequency': 5e6,
-        'sound_speed': 1540,
-        'directivity': 1.0,
-        'to_world': mi.ScalarTransform4f().look_at(
-            origin=[0, 0, 0.03],
-            target=[0, 0, 0],
-            up=[0, 1, 0]
-        ),
-        'film': {
-            'type': 'hdrfilm',
-            'width': 512,
-            'height': 512,
-            'pixel_format': 'luminance',
-            'component_format': 'float32'
-        }
-    },
-    'emitter': {
-        'type': 'ultrasound_emitter',
-        'number_of_elements': 128,
-        'radius': float('inf'),  # Linear array
-        'central_frequency': 5e6,
-        'to_world': mi.ScalarTransform4f().look_at(
-            origin=[0, 0, 0.03],
-            target=[0, 0, 0],
-            up=[0, 1, 0]
-        )
-    },
-    'shape': {
-        'type': 'sphere',
-        'center': [0, 0, 0],
-        'radius': 0.01,
-        'bsdf': {
-            'type': 'ultrasound_bsdf',
-            'impedance': 7.8,
-            'roughness': 0.5
-        }
-    },
-}
 def us_render():
+    scene_dict = {
+        'type': 'scene',
+        'integrator': {
+            'type': 'ultrasound_integrator',
+            'max_depth': 3, # Keep at 1 for simpler debugging
+            'sampling_rate': 50e6,
+            'frequency': 5e6,
+            'sound_speed': 1540,
+            'attenuation': 0.5, # Keep at 0.0 for debugging signal strength
+            'wave_cycles': 5,
+            'main_beam_angle': 5,
+            'cutoff_angle': 180,
+            'n_elements': 64, # Keep low for faster debugging
+            'pitch': 0.00035,
+            'time_samples': 4000, # Keep large enough
+            'angles': dr.linspace(mi.Float, -10, 10, 5) # Keep low for faster debugging
+        },
+            'sensor': {
+            'type': 'ultrasound_sensor',
+            'num_elements_lateral': 128,
+            'elements_width': 0.003,
+            'elements_height': 0.01,
+            'pitch': 0.00035,
+            'radius': float('inf'),  # Linear array
+            'center_frequency': 5e6,
+            'sound_speed': 1540,
+            'directivity': 1.0,
+            'to_world': mi.ScalarTransform4f().look_at(
+                origin=[0, 0, 0.03],
+                target=[0, 0, 0],
+                up=[0, 1, 0]
+            ),
+            'film': {
+                'type': 'hdrfilm',
+                'width': 512,
+                'height': 512,
+                'pixel_format': 'luminance',
+                'component_format': 'float32'
+            }
+        },
+        'emitter': {
+            'type': 'ultrasound_emitter',
+            'number_of_elements': 128,
+            'radius': float('inf'),  # Linear array
+            'central_frequency': 5e6,
+            'to_world': mi.ScalarTransform4f().look_at(
+                origin=[0, 0, 0.03],
+                target=[0, 0, 0],
+                up=[0, 1, 0]
+            )
+        },
+        'shape': {
+            'type': 'sphere',
+            'center': [0, 0, 0],
+            'radius': 0.01,
+            'bsdf': {
+                'type': 'ultrasound_bsdf',
+                'impedance': 78,
+                'roughness': 0.5
+            }
+        },
+    }
+
     scene = mi.load_dict(scene_dict)
 
     # Get the integrator instance
@@ -259,13 +260,13 @@ initial_image = display_image
 params = mi.traverse(scene)
 print(params.keys())
 
-opt_key = 'shape.bsdf.impedance'
+opt_key = 'shape.bsdf.roughness'
 
 # Save original value
 param_ref = params[opt_key]
 
 # Change value and update
-params[opt_key] = 0.1
+params[opt_key] = 0.5
 params.update()
 
 # Setting up optimizer
@@ -294,7 +295,7 @@ for it in range(iteration_count):
     opt.step()
 
     # Ensure opt variable stays clamped
-    opt[opt_key] = dr.clip(opt[opt_key], 0.0001, 1000000)
+    opt[opt_key] = dr.clip(opt[opt_key], 0.0001, 1)
 
     # Update scene state
     params.update(opt)

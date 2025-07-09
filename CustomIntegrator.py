@@ -12,7 +12,7 @@ class UltraIntegrator(mi.SamplingIntegrator):
         self.sound_speed = props.get('sound_speed', 1540)
         self.attenuation = props.get('attenuation', 0.5)
         self.wave_cycles = props.get('wave_cycles', 5)
-        self.main_beam_angle = props.get("main_beam_angle", 5)
+        self.main_beam_angle = props.get("main_beam_angle", 180)
         self.cutoff_angle = props.get("cutoff_angle", 120)
         self.fs = props.get('sampling_rate', 50e6)
 
@@ -93,6 +93,7 @@ class UltraIntegrator(mi.SamplingIntegrator):
                     trans_normal_world = dr.normalize(sensor_transform @ mi.Vector3f(0, 0, 1))
                     alpha = dr.abs(dr.acos(dr.dot(trans_normal_world, wi)))
                     mid_cond = (alpha_c - alpha) / (alpha_c - alpha_m)
+
                     return dr.select(alpha <= alpha_m, 1.0,
                                      dr.select(alpha <= alpha_c,
                                                mid_cond,

@@ -12,9 +12,9 @@ class UltraBSDF(mi.BSDF):
         if props.has_property('impedance'):
             self.impedance = mi.Float(props['impedance'])
 
-        self.roughness = 0.5
+        self.roughness = mi.Float(0.5)
         if props.has_property('roughness'):
-            self.roughness = props['roughness']
+            self.roughness = mi.Float(props['roughness'])
 
         
         # Set Appropriate flags
@@ -70,7 +70,6 @@ class UltraBSDF(mi.BSDF):
         # Visable-normal pdf
         pdf_m = G1_wi * dr.abs(dr.dot(wi, m)) * D / dr.maximum(wi.z, 1e-7)
 
-
         return m, D, G1_wi, pdf_m
     
 
@@ -83,66 +82,67 @@ class UltraBSDF(mi.BSDF):
 
 
         # Sample Micro facet normals
-
         m, D, G1_wi, pdf_m = self._ggx_sample(si.wi, si.n, sample2)
+        cos_wi_m = dr.dot(incident_direction, m) 
 
-        # Snells ratio
-        entering = dr.dot(si.n, si.wi) > 0
-        medium_z = 1.54
+        # Snells ratio calculations
+        entering = dr.dot(m, incident_direction) > 0
+        medium_z = 20
         Z1 = dr.select(entering, medium_z, self.impedance)
         Z2 = dr.select(entering, self.impedance, medium_z)
 
-        snells_ratio = Z1 / Z2
+        
 
+        snells_ratio = mi.Float(Z1 / Z2)
 
+        # Directions wrt the micro facet normal
+        reflected_direction = incident_direction - 2 * cos_wi_m * m
+        cos_theta_i = dr.dot(incident_direction, m)
+        transmission_direction = mi.refract(incident_direction, mi.Normal3f(m), cos_theta_i, snells_ratio)
+        tir = dr.all(transmission_direction == 0)
 
-        cosTr = dr.dot(surface_normal, -(incident_direction))
-
-        sqrt_arg = 1- (snells_ratio ** 2) * (1 - cosTr**2)
-        sqrt_arg = dr.maximum(sqrt_arg, 0.0)
-        cosTt = dr.sqrt(sqrt_arg)
-
-        reflected_direction = incident_direction + 2 * cosTr * surface_normal
-        transmission_direction = snells_ratio * incident_direction + (snells_ratio * (cosTr - cosTt)) * surface_normal
 
         # Amplitude calculations
-        denom = Z1 * cosTt + Z2 * cosTr
-        denom = dr.select(dr.abs(denom) < 1e-8, 1e-8, denom)  # Avoid division by zero
-        Ar = (Z1 * cosTr - Z2 * cosTt) / denom
-
+        cosTr = dr.dot(m, incident_direction)
+        sqrt_arg = 1 - (snells_ratio ** 2) * (1 - cosTr**2)
+        cosTt = dr.sqrt(dr.maximum(sqrt_arg, 0.0))
+        cosTt = dr.select(cosTr > 0, cosTt, -cosTt)
+        denom = dr.maximum(Z1 * cosTt + Z2 * cosTr, 1e-8)
+        Ar = -(Z1 * cosTr - Z2 * cosTt) / denom
         At = mi.Float(1. - Ar)
 
-        # After Fresnel calculation:
-        #dr.print("Impedance ratio:", snells_ratio)
-        #dr.print("Ar should be [-1,1]:", dr.clamp(Ar, -1.0, 1.0))
+        dr.print(Ar)
 
-        # Clamp to physical range:
-        Ar = dr.clamp(Ar, -1.0, 1.0)
-        At = dr.clamp(At, -1.0, 1.0)
+   
 
+        
 
+        # Russian roulette 
         prob_reflect = dr.clamp(dr.abs(Ar), 0.0, 1.0)
-        select_reflect = sample1 < prob_reflect
+        select_reflect = dr.select(tir, True, sample1 < prob_reflect)
 
-        chosen_dir = dr.select(select_reflect,
-                               reflected_direction,
-                               transmission_direction)
+        chosen_dir = dr.select(select_reflect, reflected_direction,
+                                            transmission_direction)
         
+        # Outgoing direction PDF
+        pdf_reflect = pdf_m / (4 * dr.abs(cos_wi_m))
+        cos_wo_m = dr.dot(transmission_direction, m)
+        abs_n_wi = dr.abs(dr.dot(surface_normal, incident_direction))
+        abs_n_wo = dr.maximum(dr.abs(dr.dot(surface_normal, transmission_direction)), 1e-7)
+        pdf_trans = pdf_m * snells_ratio ** 2 * dr.abs(cos_wo_m) / (abs_n_wi * abs_n_wo)
+
         bs = mi.BSDFSample3f()
-        
         bs.sampled_type = dr.select(select_reflect,
-                                    mi.UInt32(+mi.BSDFFlags.DeltaReflection),
-                                    mi.UInt32(+mi.BSDFFlags.DeltaTransmission))
-        bs.sampled_component = dr.select(select_reflect, mi.UInt32(0), mi.UInt32(1))
-        bs.pdf = dr.select(select_reflect, prob_reflect, 1 - prob_reflect )
-        bs.wo = si.to_local(chosen_dir)
-        bs.eta = 1.0
-        acoustic_response = dr.select(select_reflect, Ar, At)
-
-
-        #dr.print(cosTr)
-        #dr.print(cosTt)
+                                   mi.UInt32(+mi.BSDFFlags.GlossyReflection),
+                                   mi.UInt32(+mi.BSDFFlags.GlossyTransmission))
         
+        bs.wo  = si.to_local(chosen_dir)
+        bs.pdf = dr.select(select_reflect, pdf_reflect, pdf_trans)
+        bs.eta = 1.0
+        bs.sampled_component = dr.select(select_reflect, mi.UInt32(0), mi.UInt32(1))
+
+        acoustic_response = dr.select(select_reflect, Ar, At)
+    
 
         return (bs, acoustic_response)
 
