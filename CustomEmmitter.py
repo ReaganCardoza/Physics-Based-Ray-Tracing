@@ -43,23 +43,21 @@ class CustomEmitter(mi.Emitter):
 
         if self.radius > 0:
 
-            #calculate the x and y coordinates
+            #the curve is in the x-z plane
             xs = self.radius * dr.sin(theta_steps)
-            ys = self.radius * dr.cos(theta_steps)
+            zs = self.radius * (1-dr.cos(theta_steps))
 
-            #calculate the normals
-            nx = dr.sin(theta_steps)
-            ny = dr.cos(theta_steps)
+            self.element_positons = mi.Point3f(xs, 0.0, zs)
+            self.element_normals = mi.Vector3f(dr.sin(theta_steps), 0.0, dr.cos(theta_steps))
 
         else:
+            #if the transducer is linear then create an array of points in the x direction
             xs = dr.linspace(dr.scalar.ArrayXf, (-total_span_x / 2), (total_span_x / 2), self.number_of_elements)
-            ys = np.zeros_like(theta_steps)
 
-            nx = np.zeros_like(theta_steps)
-            ny = np.ones_like(theta_steps)
+            self.element_positions = mi.point3f(xs, 0.0, 0.0)
 
-        self.element_positions = mi.Point3f(xs, ys, 0.0)
-        self.element_normals = mi.Vector3f(nx, ny, 0.0)
+            #If it is linear then everything is just poiting in positive z direction
+            self.element_normals = mi.Vector3f(0.0, 0.0, 1.0)
 
         return self.element_positions, self.element_normals
 
@@ -92,7 +90,7 @@ class CustomEmitter(mi.Emitter):
         ps, pdf_pos = self.sample_position(time, sample2, active )
 
         psi = self.steering_angle
-        direction = mi.Vector3f(dr.sin(psi), dr.cos(psi), 0)
+        direction = mi.Vector3f(dr.sin(psi), 0.0, dr.cos(psi))
 
         time_dr = np.full_like(ps.p.x, time)
 

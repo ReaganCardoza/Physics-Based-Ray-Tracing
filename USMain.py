@@ -52,8 +52,8 @@ def us_render():
             'sound_speed': 1540,
             'directivity': 1.0,
             'to_world': mi.ScalarTransform4f().look_at(
-                origin=[0, 0, 0.03],
-                target=[0, 0, 0],
+                origin=[0, 0, 0.0],
+                target=[0, 0, 0.3],
                 up=[0, 1, 0]
             ),
             'film': {
@@ -70,14 +70,14 @@ def us_render():
             'radius': float('inf'),  # Linear array
             'central_frequency': 5e6,
             'to_world': mi.ScalarTransform4f().look_at(
-                origin=[0, 0, 0.03],
-                target=[0, 0, 0],
+                origin=[0, 0, 0.0],
+                target=[0, 0, 0.3],
                 up=[0, 1, 0]
             )
         },
         'shape': {
             'type': 'sphere',
-            'center': [0, 0, 0],
+            'center': [0, 0, 0.3],
             'radius': 0.01,
             'bsdf': {
                 'type': 'ultrasound_bsdf',
