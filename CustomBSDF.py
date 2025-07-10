@@ -87,7 +87,7 @@ class UltraBSDF(mi.BSDF):
 
         # Snells ratio calculations
         entering = dr.dot(m, incident_direction) > 0
-        medium_z = 20
+        medium_z = 1.54
         Z1 = dr.select(entering, medium_z, self.impedance)
         Z2 = dr.select(entering, self.impedance, medium_z)
 

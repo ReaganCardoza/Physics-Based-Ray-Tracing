@@ -53,7 +53,7 @@ def us_render():
             'directivity': 1.0,
             'to_world': mi.ScalarTransform4f().look_at(
                 origin=[0, 0, 0.0],
-                target=[0, 0, 0.3],
+                target=[0, 0, 0.03],
                 up=[0, 1, 0]
             ),
             'film': {
@@ -71,17 +71,17 @@ def us_render():
             'central_frequency': 5e6,
             'to_world': mi.ScalarTransform4f().look_at(
                 origin=[0, 0, 0.0],
-                target=[0, 0, 0.3],
+                target=[0, 0, 0.03],
                 up=[0, 1, 0]
             )
         },
         'shape': {
             'type': 'sphere',
-            'center': [0, 0, 0.3],
+            'center': [0, 0, 0.03],
             'radius': 0.01,
             'bsdf': {
                 'type': 'ultrasound_bsdf',
-                'impedance': 78,
+                'impedance': 7.8,
                 'roughness': 0.5
             }
         },
