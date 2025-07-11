@@ -28,14 +28,14 @@ def us_render():
         'type': 'scene',
         'integrator': {
             'type': 'ultrasound_integrator',
-            'max_depth': 3, # Keep at 1 for simpler debugging
+            'max_depth': 100, # Keep at 1 for simpler debugging
             'sampling_rate': 50e6,
             'frequency': 5e6,
             'sound_speed': 1540,
             'attenuation': 0.5, # Keep at 0.0 for debugging signal strength
             'wave_cycles': 5,
-            'main_beam_angle': 5,
-            'cutoff_angle': 180,
+            'main_beam_angle': 24,
+            'cutoff_angle': 30,
             'n_elements': 64, # Keep low for faster debugging
             'pitch': 0.00035,
             'time_samples': 4000, # Keep large enough
@@ -43,7 +43,7 @@ def us_render():
         },
             'sensor': {
             'type': 'ultrasound_sensor',
-            'num_elements_lateral': 128,
+            'num_elements_lateral': 1280,
             'elements_width': 0.003,
             'elements_height': 0.01,
             'pitch': 0.00035,
@@ -66,7 +66,7 @@ def us_render():
         },
         'emitter': {
             'type': 'ultrasound_emitter',
-            'number_of_elements': 128,
+            'number_of_elements': 1280,
             'radius': float('inf'),  # Linear array
             'central_frequency': 5e6,
             'to_world': mi.ScalarTransform4f().look_at(
@@ -78,7 +78,7 @@ def us_render():
         'shape': {
             'type': 'sphere',
             'center': [0, 0, 0.03],
-            'radius': 0.01,
+            'radius': 0.025,
             'bsdf': {
                 'type': 'ultrasound_bsdf',
                 'impedance': 7.8,
@@ -194,9 +194,9 @@ def us_render():
     z_scan = np.arange(z_min_scan, z_max_scan + step_axial, step_axial)
 
     if len(x_scan) == 0:
-        x_scan = np.array([x_min_scan])
+        x_scan = dr.array([x_min_scan])
     if len(z_scan) == 0:
-        z_scan = np.array([z_min_scan])
+        z_scan = dr.array([z_min_scan])
 
     num_x_pixels = len(x_scan)
     num_z_pixels = len(z_scan)
@@ -221,7 +221,7 @@ def us_render():
     depth_axis_mm = (np.arange(time_samples) / fs) * (c / 2) * 1e3
 
 
-    display_image = dr.scalar.TensorXf(display_image.T)
+    display_image = display_image.T
 
     print("Shape of display_image:", display_image.shape)
     print("Expected shape: (len(z_scan), len(x_scan)) = ({}, {})".format(len(z_scan), len(x_scan)))
@@ -266,7 +266,7 @@ opt_key = 'shape.bsdf.roughness'
 param_ref = params[opt_key]
 
 # Change value and update
-params[opt_key] = 0.5
+params[opt_key] = 0.1
 params.update()
 
 # Setting up optimizer
@@ -287,6 +287,9 @@ for it in range(iteration_count):
 
     # Evaluate losee function
     loss = mse(image)
+
+    # np to dr
+    loss = dr.llvm.Float(loss)
 
     # Backwardspropigate through the rendering process
     dr.backward(loss)

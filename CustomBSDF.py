@@ -95,23 +95,29 @@ class UltraBSDF(mi.BSDF):
 
         snells_ratio = mi.Float(Z1 / Z2)
 
-        # Directions wrt the micro facet normal
-        reflected_direction = incident_direction - 2 * cos_wi_m * m
-        cos_theta_i = dr.dot(incident_direction, m)
-        transmission_direction = mi.refract(incident_direction, mi.Normal3f(m), cos_theta_i, snells_ratio)
-        tir = dr.all(transmission_direction == 0)
+
+
 
 
         # Amplitude calculations
-        cosTr = dr.dot(m, incident_direction)
+        cosTr = dr.abs(dr.dot(m, incident_direction))
         sqrt_arg = 1 - (snells_ratio ** 2) * (1 - cosTr**2)
         cosTt = dr.sqrt(dr.maximum(sqrt_arg, 0.0))
-        cosTt = dr.select(cosTr > 0, cosTt, -cosTt)
-        denom = dr.maximum(Z1 * cosTt + Z2 * cosTr, 1e-8)
-        Ar = -(Z1 * cosTr - Z2 * cosTt) / denom
-        At = mi.Float(1. - Ar)
-
+        denom = Z1 * cosTt + Z2 * cosTr
+        Ar = dr.abs((Z1 * cosTr - Z2 * cosTt) / denom)
         dr.print(Ar)
+        At = dr.abs(mi.Float(1. - Ar))
+
+        reflected_direction = incident_direction + 2 * cos_wi_m * m
+        transmission_direction = snells_ratio * reflected_direction + (snells_ratio * (cosTr - cosTt)) * m
+
+
+
+
+        tir = dr.all(transmission_direction == 0)
+
+
+     
 
    
 

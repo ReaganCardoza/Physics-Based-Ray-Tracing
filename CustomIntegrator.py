@@ -12,8 +12,8 @@ class UltraIntegrator(mi.SamplingIntegrator):
         self.sound_speed = props.get('sound_speed', 1540)
         self.attenuation = props.get('attenuation', 0.5)
         self.wave_cycles = props.get('wave_cycles', 5)
-        self.main_beam_angle = props.get("main_beam_angle", 180)
-        self.cutoff_angle = props.get("cutoff_angle", 120)
+        self.main_beam_angle = props.get("main_beam_angle", 10)
+        self.cutoff_angle = props.get("cutoff_angle", 20)
         self.fs = props.get('sampling_rate', 50e6)
 
         # Transducer geometry
@@ -91,14 +91,18 @@ class UltraIntegrator(mi.SamplingIntegrator):
 
                 def directivity_weight_i(wi, n, alpha_m, alpha_c):
                     trans_normal_world = dr.normalize(sensor_transform @ mi.Vector3f(0, 0, 1))
-                    alpha = dr.abs(dr.acos(dr.dot(trans_normal_world, wi)))
+                    wi = -wi
+                    dot = dr.dot(trans_normal_world, wi)
+                    alpha = dr.abs(dr.acos(dot))
+
                     mid_cond = (alpha_c - alpha) / (alpha_c - alpha_m)
 
-                    return dr.select(alpha <= alpha_m, 1.0,
+                    weight = dr.select(alpha <= alpha_m, 1.0,
                                      dr.select(alpha <= alpha_c,
                                                mid_cond,
                                                0.0))
 
+                    return weight
                 state = (amp, atten, tof, geo_len, depth, ray, active_ray)
 
                 def cond(amp, atten, tof, geo_len, depth, ray, active_ray):
@@ -156,9 +160,11 @@ class UltraIntegrator(mi.SamplingIntegrator):
                     geo_len += distance
                     depth += 1
 
+                    
+
                     trans_norm_world = dr.normalize(sensor_transform @ mi.Vector3f(0, 0, 1))
                     cos_min = dr.cos(dr.deg2rad(self.cutoff_angle))
-                    within_angle = dr.dot(-ray.d, trans_norm_world) >= cos_min
+                    within_angle = dr.dot(ray.d, trans_norm_world) >= cos_min
                     path_ok = geo_len < 0.2
                     depth_ok = depth < self.max_depth
 
