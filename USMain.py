@@ -38,7 +38,7 @@ def us_render():
             'cutoff_angle': 30,
             'n_elements': 64, # Keep low for faster debugging
             'pitch': 0.00035,
-            'time_samples': 4000, # Keep large enough
+            'time_samples': 10000, # Keep large enough
             'angles': dr.linspace(mi.Float, -10, 10, 5) # Keep low for faster debugging
         },
             'sensor': {
@@ -64,25 +64,13 @@ def us_render():
                 'component_format': 'float32'
             }
         },
-        'emitter': {
-            'type': 'ultrasound_emitter',
-            'number_of_elements': 1280,
-            'radius': float('inf'),  # Linear array
-            'central_frequency': 5e6,
-            'to_world': mi.ScalarTransform4f().look_at(
-                origin=[0, 0, 0.0],
-                target=[0, 0, 0.03],
-                up=[0, 1, 0]
-            )
-        },
-        'shape': {
-            'type': 'sphere',
-            'center': [0, 0, 0.03],
-            'radius': 0.025,
+       'shape': {
+            'type': 'rectangle',
+            'to_world': mi.ScalarTransform4f().translate(mi.ScalarVector3f(0.0, 0.0, 0.01)).scale(mi.ScalarPoint3f(0.01, 0.01, 0.01)),
             'bsdf': {
                 'type': 'ultrasound_bsdf',
                 'impedance': 7.8,
-                'roughness': 0.5
+                'roughness': 0.1
             }
         },
     }
