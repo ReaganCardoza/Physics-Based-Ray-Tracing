@@ -83,8 +83,9 @@ class UltraBSDF(mi.BSDF):
 
         # Sample Micro facet normals
         m, pdf_m = self._ggx_sample(si.wi, si.n, sample1)
-        m = surface_normal
 
+        # Ensure proper orientation
+        m = dr.select(dr.dot(m, incident_direction) < 0, m, -m)
         cos_wi_m = dr.dot(incident_direction, m) 
 
         # Snells ratio calculations
@@ -102,22 +103,23 @@ class UltraBSDF(mi.BSDF):
 
 
         # Amplitude calculations
+        
         cosTr = dr.abs(dr.dot(m, incident_direction))
-        #dr.print(cosTt)
         sqrt_arg = 1 - (snells_ratio ** 2) * (1 - cosTr**2)
         cosTt = dr.sqrt(dr.maximum(sqrt_arg, 0.0))
-        denom = Z1 * cosTr + Z2 * cosTr
+        denom = Z1 * cosTr + Z2 * cosTt
         Ar = (Z1 * cosTr - Z2 * cosTt) / denom
-        At = (2 * Z2 * cosTr) / (Z2 * cosTr + Z1 * cosTt)
+        At = 1. - Ar
 
 
         dr.print(Ar)
 
 
         reflected_direction = incident_direction + 2 * cos_wi_m * m
-        transmission_direction = snells_ratio * reflected_direction + (snells_ratio * (cosTr - cosTt)) * m
+        transmission_direction = snells_ratio * reflected_direction + (snells_ratio * cosTr - cosTt) * m
 
-
+        reflected_direction = mi.Vector3f(reflected_direction)
+        transmission_direction = mi.Vector3f(transmission_direction)
 
 
         tir = sqrt_arg < 0
@@ -125,9 +127,10 @@ class UltraBSDF(mi.BSDF):
         
 
         # If Ar is amplitude, square it for energy
-        prob_reflect = dr.clamp(dr.abs(Ar) ** 2, 0.0, 1.0)
+        prob_reflect = Ar * Ar
         # Force reflection on TIR, otherwise use Russian roulette
-        select_reflect = dr.select(tir, True, sample1 < prob_reflect)
+        prob_reflect_bool = (sample2 < prob_reflect)[0]
+        select_reflect = dr.select(tir, True, prob_reflect_bool)
 
         chosen_dir = dr.select(select_reflect, reflected_direction,
                                             transmission_direction)
