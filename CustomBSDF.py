@@ -70,7 +70,7 @@ class UltraBSDF(mi.BSDF):
         # Visable-normal pdf
         pdf_m = G1_wi * dr.abs(dr.dot(wi, m)) * D / dr.maximum(wi.z, 1e-7)
 
-        return m, D, G1_wi, pdf_m
+        return m, pdf_m
     
 
 
@@ -82,12 +82,14 @@ class UltraBSDF(mi.BSDF):
 
 
         # Sample Micro facet normals
-        m, D, G1_wi, pdf_m = self._ggx_sample(si.wi, si.n, sample2)
+        m, pdf_m = self._ggx_sample(si.wi, si.n, sample1)
+        m = surface_normal
+
         cos_wi_m = dr.dot(incident_direction, m) 
 
         # Snells ratio calculations
         entering = dr.dot(m, incident_direction) > 0
-        medium_z = 1.54
+        medium_z = 1.5
         Z1 = dr.select(entering, medium_z, self.impedance)
         Z2 = dr.select(entering, self.impedance, medium_z)
 
@@ -101,12 +103,16 @@ class UltraBSDF(mi.BSDF):
 
         # Amplitude calculations
         cosTr = dr.abs(dr.dot(m, incident_direction))
+        #dr.print(cosTt)
         sqrt_arg = 1 - (snells_ratio ** 2) * (1 - cosTr**2)
         cosTt = dr.sqrt(dr.maximum(sqrt_arg, 0.0))
-        denom = Z1 * cosTt + Z2 * cosTr
-        Ar = dr.abs((Z1 * cosTr - Z2 * cosTt) / denom)
+        denom = Z1 * cosTr + Z2 * cosTr
+        Ar = (Z1 * cosTr - Z2 * cosTt) / denom
+        At = (2 * Z2 * cosTr) / (Z2 * cosTr + Z1 * cosTt)
+
+
         dr.print(Ar)
-        At = dr.abs(mi.Float(1. - Ar))
+
 
         reflected_direction = incident_direction + 2 * cos_wi_m * m
         transmission_direction = snells_ratio * reflected_direction + (snells_ratio * (cosTr - cosTt)) * m
@@ -114,17 +120,13 @@ class UltraBSDF(mi.BSDF):
 
 
 
-        tir = dr.all(transmission_direction == 0)
-
-
-     
-
-   
+        tir = sqrt_arg < 0
 
         
 
-        # Russian roulette 
-        prob_reflect = dr.clamp(dr.abs(Ar), 0.0, 1.0)
+        # If Ar is amplitude, square it for energy
+        prob_reflect = dr.clamp(dr.abs(Ar) ** 2, 0.0, 1.0)
+        # Force reflection on TIR, otherwise use Russian roulette
         select_reflect = dr.select(tir, True, sample1 < prob_reflect)
 
         chosen_dir = dr.select(select_reflect, reflected_direction,
