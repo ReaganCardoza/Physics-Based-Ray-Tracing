@@ -65,8 +65,9 @@ def us_render():
             }
         },
        'shape': {
-            'type': 'rectangle',
-            'to_world': mi.ScalarTransform4f().translate(mi.ScalarVector3f(0.0, 0.0, 0.01)).scale(mi.ScalarPoint3f(0.01, 0.01, 0.01)),
+            'type': 'sphere',
+            'center': [0, 0, 0.01],
+            'radius': 0.01,
             'bsdf': {
                 'type': 'ultrasound_bsdf',
                 'impedance': 7.8,
