@@ -1,5 +1,6 @@
 import mitsuba as mi
 import drjit as dr
+import numpy as np
 
 
 
@@ -58,12 +59,13 @@ class UltraIntegrator(mi.SamplingIntegrator):
         c_scalar = float(self.sound_speed)
         pitch_scalar = float(self.pitch)
         time_samples_scalar = int(self.time_samples)
+        num_rays = n_angles_scalar * n_elements_scalar
 
         #Initializing the matrix
         self.channel_buf = dr.zeros(mi.Float, n_angles_scalar * n_elements_scalar * time_samples_scalar)
         self.transmission_delays_buf = dr.zeros(mi.Float, n_angles_scalar * n_elements_scalar)
 
-
+        
 
         for angle_idx_val in range(n_angles_scalar):
             angle_id_outer = mi.UInt32(angle_idx_val)
@@ -106,7 +108,10 @@ class UltraIntegrator(mi.SamplingIntegrator):
                 depth = mi.UInt32(0)
                 active_ray = mi.Bool(True)
 
-                def directivity_weight_i(wi, n, alpha_m, alpha_c):
+                def directivity_weight_o(wo, n, N):
+                    return (dr.dot(wo,n)) / N
+
+                def directivity_weight_i(wi, alpha_m, alpha_c):
 
                     #Weighting rfom the paper
                     trans_normal_world = dr.normalize(sensor_transform @ mi.Vector3f(0, 0, 1))
@@ -138,42 +143,52 @@ class UltraIntegrator(mi.SamplingIntegrator):
                     #If the ray is actice give the distance if it is not then return 0 distance
                     distance = dr.select(active_ray, si.t, 0.0)
 
+                    # Random sampling
+                    random_float = np.random.uniform(0.0, 1.0)
+                    recv_elem_id = mi.UInt32(int(np.floor(random_float * n_elements_scalar)))
                     elem_off = (n_elements_scalar - 1) * 0.5
-                    target = mi.Point3f(pitch_scalar * (mi.Float(elem_id_outer) - elem_off), 0, 0)
+                    target = mi.Point3f(pitch_scalar * (mi.Float(recv_elem_id) - elem_off), 0, 0)
                     target_world = sensor_transform @ target
-
-
                     sec_dir = dr.normalize(target_world - si.p)
                     vis_si = scene.ray_intersect(si.spawn_ray(sec_dir), active_ray)
-                    visible = vis_si.is_valid() & active_ray
+                    visible = ~vis_si.is_valid() & active_ray
 
                     atten_factor = dr.exp(-self.attenuation * self.frequency * 1e-6 * distance / 8.686)
                     atten *= atten_factor
-                    tof += distance / c_scalar
-                    phase = 2 * dr.pi * self.frequency * tof
+                    
+                    tof_to_intersection = tof + distance / c_scalar
+                    dist_to_recv = dr.norm(target_world - si.p)
+                    total_time = tx_delay_outer + tof_to_intersection + dist_to_recv / c_scalar
+                    phase = 2 * dr.pi * self.frequency * total_time
 
                     ctx = mi.BSDFContext()
                     bsdf = si.bsdf()
-                    bs, a_resp = bsdf.sample(ctx, si, dr.full(mi.Float, 0.5), dr.full(mi.Float, 0.5), active_ray)
-                    amp *= a_resp
+
+                    sample1_value = np.random.uniform(0,1)
+                    sample2_value = np.random.uniform(0,1)
+                    bs, a_resp = bsdf.sample(ctx, si, dr.full(mi.Float, sample1_value), dr.full(mi.Float, sample2_value), active_ray)
+                    cos_theta = dr.dot(si.sh_frame.n, -ray.d)  # Incoming direction relative to normal
+                    amp *= a_resp * cos_theta #/ dr.maximum(bs.pdf, 1e-6)
+
+                    #dr.print(amp)
 
                     # REVERTED: Use original mask logic
-                    mask = active_ray # Re-enable the 'visible' check
+                    mask = visible & active_ray # Re-enable the 'visible' check
 
-                    fd = directivity_weight_i(sec_dir, si.sh_frame.n, dr.deg2rad(self.main_beam_angle),
-                                              dr.deg2rad(self.cutoff_angle))
+                    fd = directivity_weight_i(sec_dir, dr.deg2rad(self.main_beam_angle), dr.deg2rad(self.cutoff_angle)) * directivity_weight_o( ray.d , si.sh_frame.n ,num_rays)
+                        
                     # REVERTED: Use original pressure_scalar
                     pressure_scalar = atten * amp * fd * dr.sin(phase)
 
                     #Calculating total time of flight
-                    total_time = dr.maximum(tx_delay_outer + (tof * 2) , 0.0)
+
                     t_idx = dr.round(total_time * fs_scalar)
                     t_idx = dr.clamp(t_idx, 0, time_samples_scalar - 1)
                     t_idx = mi.UInt32(t_idx)
 
 
                     #Accumulating the channel data
-                    channel_index_local = angle_id_outer * n_elements_scalar + elem_id_outer
+                    channel_index_local = angle_id_outer * n_elements_scalar + recv_elem_id
                     flat = channel_index_local * time_samples_scalar + t_idx
                     max_flat = n_angles_scalar * n_elements_scalar * time_samples_scalar - 1
                     flat = dr.clamp(flat, 0, max_flat)
@@ -194,8 +209,9 @@ class UltraIntegrator(mi.SamplingIntegrator):
                     depth_ok = depth < self.max_depth
 
                     #possible bug that is killing rays
-                    rr_prob = dr.minimum(dr.max(atten * amp), 0.95)
-                    survive = (mi.Float(0.5) < rr_prob) & active_ray
+                    rr_cut_off = np.random.uniform(0,1)
+                    rr_prob = dr.minimum(dr.max(atten * amp), 1.0)
+                    survive = (mi.Float(rr_cut_off) < rr_prob) & active_ray
 
                     active_ray &= within_angle & path_ok & depth_ok & survive
                     atten = dr.select(survive, atten / rr_prob, 0.0)

@@ -54,21 +54,24 @@ class UltraBSDF(mi.BSDF):
         m_stretched = d.x * T1 + d.y * T2 + dr.sqrt(dr.maximum(1.0 - d.x * d.x - d.y * d.y, 0.0)) * wi_stretched
         m = mi.Vector3f(alpha * m_stretched.x,
                         alpha * m_stretched.y,
-                        dr.maximum(m_stretched.z, 0.0))
+                        m_stretched.z)
         m = dr.normalize(m)
 
         # GGX NDF
-        cos_theta_m = m.z
+        cos_theta_m = dr.dot(wi_world, n_world)
         alpha2 = alpha * alpha
         denom = dr.maximum(cos_theta_m * cos_theta_m * ( alpha2 - 1.0) + 1.0, 1e-7)
+        
         D = alpha2 / (dr.pi * denom * denom)
 
         # G1 for the incident direction
         tan2_theta = dr.maximum(1.0 - wi.z*wi.z, 0.0) / dr.maximum(wi.z * wi.z, 1e-7)
         G1_wi = 2.0/ (1.0 + dr.sqrt(1.0 + alpha2 * tan2_theta))
 
+        
+
         # Visable-normal pdf
-        pdf_m = G1_wi * dr.abs(dr.dot(wi, m)) * D / dr.maximum(wi.z, 1e-7)
+        pdf_m = G1_wi * dr.abs(dr.dot(wi, m)) * D 
 
         return m, pdf_m
     
@@ -84,13 +87,15 @@ class UltraBSDF(mi.BSDF):
         # Sample Micro facet normals
         m, pdf_m = self._ggx_sample(si.wi, si.n, sample1)
 
+        dr.print(pdf_m)
+
         # Ensure proper orientation
         m = dr.select(dr.dot(m, incident_direction) < 0, m, -m)
         cos_wi_m = dr.dot(incident_direction, m) 
 
         # Snells ratio calculations
         entering = dr.dot(m, incident_direction) > 0
-        medium_z = 1.5
+        medium_z = 1.2
         Z1 = dr.select(entering, medium_z, self.impedance)
         Z2 = dr.select(entering, self.impedance, medium_z)
 
@@ -112,7 +117,7 @@ class UltraBSDF(mi.BSDF):
         At = 1. - Ar
 
 
-        dr.print(Ar)
+
 
 
         reflected_direction = incident_direction + 2 * cos_wi_m * m
@@ -152,7 +157,9 @@ class UltraBSDF(mi.BSDF):
         bs.eta = 1.0
         bs.sampled_component = dr.select(select_reflect, mi.UInt32(0), mi.UInt32(1))
 
-        acoustic_response = dr.select(select_reflect, Ar, At)
+        acoustic_response_amp = dr.select(select_reflect, Ar, At)
+
+        acoustic_response = acoustic_response_amp 
     
 
         return (bs, acoustic_response)
