@@ -35,8 +35,8 @@ scene_dict = {
         'wave_cycles': 5,
         'main_beam_angle': 8,
         'cutoff_angle': 10,
-        'n_elements': 256, # Keep low for faster debugging
-        'pitch': 0.00035,
+        'n_elements': 250, # Keep low for faster debugging
+        'pitch': 0.0000175,
         'time_samples': 10000, # Keep large enough
         'angles': dr.linspace(mi.Float, -10, 10, 40) # Keep low for faster debugging
     },
