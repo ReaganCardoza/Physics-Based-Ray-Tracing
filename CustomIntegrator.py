@@ -89,7 +89,7 @@ class UltraIntegrator(mi.SamplingIntegrator):
 
 
             #placing in array
-            dr.scatter(self.transmission_delays_buf, tx_delay_outer, delay_flat_idx_outer)
+            #dr.scatter(self.transmission_delays_buf, tx_delay_outer, delay_flat_idx_outer)
 
             # --- REVERTED: Original ray tracing setup ---
             origin = mi.Point3f(x_elem_outer, 0, 0) # Use outer variable
@@ -112,15 +112,23 @@ class UltraIntegrator(mi.SamplingIntegrator):
             depth = mi.UInt32(0)
             active_ray = mi.Bool(True)
 
-            state = (amp, atten, tof, geo_len, depth, ray, active_ray)
+            pressure_scalar = mi.Color1f(1)
+            flat = dr.zeros(mi.UInt32)
+            mask = dr.ones(mi.Bool)
+
+            scatter_values = []
+            scatter_indices = []
+            scatter_masks = []
+
+            state = amp, atten, tof, geo_len, depth, ray, active_ray, pressure_scalar, flat, mask
 
 
-            def cond(amp, atten, tof, geo_len, depth, ray, active_ray):
+            def cond(amp, atten, tof, geo_len, depth, ray, active_ray, pressure_scalar, flat, mask):
                     # Original condition for max_depth and path length
                     return active_ray & (depth < self.max_depth) & (geo_len < 0.2)
 
             #Handling the math per element per angle
-            def body(amp, atten, tof, geo_len, depth, ray, active_ray):
+            def body(amp, atten, tof, geo_len, depth, ray, active_ray, pressure_scalar, flat, mask):
                 ### Primary intersection
                 si = scene.ray_intersect(ray, active_ray)
                 active_ray &= si.is_valid()
@@ -199,8 +207,7 @@ class UltraIntegrator(mi.SamplingIntegrator):
                 max_flat = n_angles_scalar * n_elements_scalar * time_samples_scalar - 1
                 flat = dr.clamp(flat, 0, max_flat)
 
-                # REVERTED: Use original pressure_scalar and mask
-                dr.scatter_reduce(dr.ReduceOp.Add, self.channel_buf, pressure_scalar, flat, active=mask)
+
 
                 new_dir = si.to_world(bs.wo)
                 ray = si.spawn_ray(dr.normalize(new_dir))
@@ -222,9 +229,21 @@ class UltraIntegrator(mi.SamplingIntegrator):
                 active_ray &= within_angle & path_ok & depth_ok & survive
                 atten = dr.select(survive, atten / rr_prob, 0.0)
 
-                return (amp, atten, tof, geo_len, depth, ray, active_ray)
+                return (amp, atten, tof, geo_len, depth, ray, active_ray, pressure_scalar, flat, mask)
 
-            amp, atten, tof, geo_len, depth, ray, active_ray = dr.while_loop(state, cond, body)
+            amp, atten, tof, geo_len, depth, ray, active_ray, pressure_scalar, flat, mask = dr.while_loop(state, cond, body)
+
+            scatter_values.append(pressure_scalar)
+            scatter_indices.append(flat)
+            scatter_masks.append(mask)
+
+            return scatter_values, scatter_indices, scatter_masks
+
+
+        # Multithreaded execution
+        all_pressure_values = []
+        all_flat_values = []
+        all_mask_values = []
 
         with ThreadPoolExecutor(max_workers=20) as executor:
             futures = []
@@ -233,7 +252,23 @@ class UltraIntegrator(mi.SamplingIntegrator):
                     futures.append(executor.submit(trace_single_ray, angle_idx, elem_idx))
 
             for f in futures:
-                f.result()
+                pressure_values, flat_values, mask_values = f.result()
+                all_pressure_values.extend(pressure_values)
+                all_flat_values.extend(flat_values)
+                all_mask_values.extend(mask_values)
+
+        # Filter valid contributions (where mask is True)
+        valid_indices = [i for i, m in enumerate(all_mask_values) if m]
+        values = mi.Float([all_pressure_values[i] for i in valid_indices])
+        indices = mi.UInt32([all_flat_values[i] for i in valid_indices])
+        masks = mi.Bool([all_mask_values[i] for i in valid_indices])
+
+        # Ensure arrays are evaluated
+        dr.eval(values, indices, masks)
+
+        # Final scatter_reduce to channel_buf
+        dr.scatter_reduce(dr.ReduceOp.Add, self.channel_buf, values, indices, active=masks)
+
         
         
         
