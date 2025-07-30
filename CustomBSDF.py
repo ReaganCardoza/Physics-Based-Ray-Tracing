@@ -1,4 +1,5 @@
 import mitsuba as mi
+import numpy as np
 import drjit as dr
 
 #mi.set_variant("cuda_ad_mono")
@@ -60,6 +61,26 @@ class UltraBSDF(mi.BSDF):
         return m
     
 
+    def ggx_pdf(self, theta, alpha):
+        """
+        Compute the GGX PDF for a given angle and roughness parameter.
+        
+        Parameters:
+        - theta (float or np.ndarray): Angle(s) in degrees.
+        - alpha (float): Roughness parameter.
+        
+        Returns:
+        - pdf (float or np.ndarray): PDF value(s).
+        """
+        theta_rad = dr.deg2rad(theta)
+        cos_theta = dr.cos(theta_rad)
+        sin_theta = dr.sin(theta_rad)
+        denom = (alpha**2 - 1) * cos_theta**2 + 1
+        D = alpha**2 / (dr.pi * denom**2)  # GGX normal distribution
+        pdf = D * sin_theta  # Include solid angle term
+        pdf_max = 0.2386683650839149 # dr.max(pdf)  # Normalize for plotting (approximate)
+        pdf = pdf_max / pdf_max
+        return pdf 
     
 
 
@@ -73,7 +94,7 @@ class UltraBSDF(mi.BSDF):
         # Sample Micro facet normals
         m = self._ggx_sample(si.wi, si.n, sample1)
 
-        pdf_m = 1
+
 
         # Ensure proper orientation
         m = dr.select(dr.dot(m, incident_direction) < 0, m, -m)
@@ -126,7 +147,10 @@ class UltraBSDF(mi.BSDF):
         chosen_dir = dr.select(select_reflect, reflected_direction,
                                             transmission_direction)
         
+
+        
         # Outgoing direction PDF
+        pdf_m = self.ggx_pdf(cos_wi_m, self.roughness)
         pdf_reflect = pdf_m / (4 * dr.abs(cos_wi_m))
         cos_wo_m = dr.dot(transmission_direction, m)
         abs_n_wi = dr.abs(dr.dot(surface_normal, incident_direction))

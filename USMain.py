@@ -31,21 +31,21 @@ scene_dict = {
         'sampling_rate': 50e6,
         'frequency': 5e6,
         'sound_speed': 1540,
-        'attenuation': 0.5, # Keep at 0.0 for debugging signal strength
+        'attenuation': 0.2, # Keep at 0.0 for debugging signal strength
         'wave_cycles': 5,
         'main_beam_angle': 24,
         'cutoff_angle': 30,
-        'n_elements': 256, # Keep low for faster debugging
-        'pitch': 0.000035*4,
+        'n_elements': 64, # Keep low for faster debugging
+        'pitch': 0.00001 * 4,
         'time_samples': 10000, # Keep large enough
-        'angles': dr.linspace(mi.Float, -10, 10, 20) # Keep low for faster debugging
+        'angles': dr.linspace(mi.Float, -10, 10, 5) # Keep low for faster debugging
     },
         'sensor': {
         'type': 'ultrasound_sensor',
         'num_elements_lateral': 1280,
         'elements_width': 0.003,
         'elements_height': 0.01,
-        'pitch': 0.00035,
+        'pitch': 0.0003,
         'radius': float('inf'),  # Linear array
         'center_frequency': 5e6,
         'sound_speed': 1540,
@@ -77,7 +77,7 @@ scene_dict = {
 
         'wall_back': {
             'type': 'rectangle',
-            'to_world' : mi.ScalarTransform4f().translate([0,0,0.015]) @ 
+            'to_world' : mi.ScalarTransform4f().translate([0,0,0.03]) @ 
                          mi.ScalarTransform4f().rotate([0,1,0], 180) @
                          mi.ScalarTransform4f().scale([0.05, 0.05, 1]),
                         'bsdf': {
