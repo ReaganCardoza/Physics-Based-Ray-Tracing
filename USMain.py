@@ -33,12 +33,12 @@ scene_dict = {
         'sound_speed': 1540,
         'attenuation': 0.5, # Keep at 0.0 for debugging signal strength
         'wave_cycles': 5,
-        'main_beam_angle': 8,
-        'cutoff_angle': 10,
-        'n_elements': 250, # Keep low for faster debugging
-        'pitch': 0.0000175,
+        'main_beam_angle': 24,
+        'cutoff_angle': 30,
+        'n_elements': 256, # Keep low for faster debugging
+        'pitch': 0.000035*4,
         'time_samples': 10000, # Keep large enough
-        'angles': dr.linspace(mi.Float, -10, 10, 40) # Keep low for faster debugging
+        'angles': dr.linspace(mi.Float, -10, 10, 20) # Keep low for faster debugging
     },
         'sensor': {
         'type': 'ultrasound_sensor',
@@ -74,6 +74,18 @@ scene_dict = {
                 'roughness': 0.5
             }
         },
+
+        'wall_back': {
+            'type': 'rectangle',
+            'to_world' : mi.ScalarTransform4f().translate([0,0,0.015]) @ 
+                         mi.ScalarTransform4f().rotate([0,1,0], 180) @
+                         mi.ScalarTransform4f().scale([0.05, 0.05, 1]),
+                        'bsdf': {
+                'type': 'ultrasound_bsdf',
+                'impedance': 7.8,
+                'roughness': 0.7
+            }
+        }
 }
 
 def us_render():
@@ -175,7 +187,7 @@ def us_render():
     x_min_scan = -0.04
     x_max_scan = 0.04
     z_min_scan = 0.001
-    z_max_scan = 0.035
+    z_max_scan = 0.05
 
 
     wavelength = c / fc

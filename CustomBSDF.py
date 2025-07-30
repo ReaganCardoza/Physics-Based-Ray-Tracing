@@ -57,23 +57,9 @@ class UltraBSDF(mi.BSDF):
                         m_stretched.z)
         m = dr.normalize(m)
 
-        # GGX NDF
-        cos_theta_m = dr.dot(wi_world, n_world)
-        alpha2 = alpha * alpha
-        denom = dr.maximum(cos_theta_m * cos_theta_m * ( alpha2 - 1.0) + 1.0, 1e-7)
-        
-        D = alpha2 / (dr.pi * denom * denom)
+        return m
+    
 
-        # G1 for the incident direction
-        tan2_theta = dr.maximum(1.0 - wi.z*wi.z, 0.0) / dr.maximum(wi.z * wi.z, 1e-7)
-        G1_wi = 2.0/ (1.0 + dr.sqrt(1.0 + alpha2 * tan2_theta))
-
-        
-
-        # Visable-normal pdf
-        pdf_m = G1_wi * dr.abs(dr.dot(wi, m)) * D 
-
-        return m, pdf_m
     
 
 
@@ -85,9 +71,9 @@ class UltraBSDF(mi.BSDF):
 
 
         # Sample Micro facet normals
-        m, pdf_m = self._ggx_sample(si.wi, si.n, sample1)
+        m = self._ggx_sample(si.wi, si.n, sample1)
 
-        dr.print(pdf_m)
+        pdf_m = 1
 
         # Ensure proper orientation
         m = dr.select(dr.dot(m, incident_direction) < 0, m, -m)
