@@ -2,7 +2,7 @@ import mitsuba as mi
 import drjit as dr
 import numpy as np
 import matplotlib.pyplot as plt
-
+import torch
 
 # Import Ultraspy modules
 from ultraspy.beamformers.das import DelayAndSum
@@ -36,7 +36,7 @@ scene_dict = {
         'main_beam_angle': 24,
         'cutoff_angle': 30,
         'n_elements': 64, # Keep low for faster debugging
-        'pitch': 0.00001 * 4,
+        'pitch': 0.00003 * 4,
         'time_samples': 10000, # Keep large enough
         'angles': dr.linspace(mi.Float, -10, 10, 5) # Keep low for faster debugging
     },
@@ -88,10 +88,7 @@ scene_dict = {
         }
 }
 
-def us_render():
-
-
-    scene = mi.load_dict(scene_dict)
+def us_render(scene, return_grad_tensors = False, visualize = False):
 
     # Get the integrator instance
     integrator = scene.integrator()
@@ -116,12 +113,13 @@ def us_render():
     print("channel_buf sum:", np.sum(channel_buf))
     print("channel_buf max:", np.max(channel_buf))
 
-
     # Reshape to 3D tensor (n_angles, n_elements, time_samples)
     channel_data = channel_buf.reshape((n_angles, n_elements, time_samples))
 
     # Reshape delays to (n_angles, n_elements)
     transmission_delays = transmission_delays_flat.reshape((n_angles, n_elements))
+
+    ul_delays = transmission_delays
 
 
 #Ultraspy Integration Starts Here
@@ -134,9 +132,6 @@ def us_render():
         central_freq=fc,
         bandwidth=70
     )
-
-    #Use the captured transmission delays directly
-    ul_delays = transmission_delays
 
     #Define Sequence Elements
     elements_indices = np.arange(n_elements)
@@ -227,51 +222,82 @@ def us_render():
 
     display_image = display_image.T
 
-    print("Shape of display_image:", display_image.shape)
-    print("Expected shape: (len(z_scan), len(x_scan)) = ({}, {})".format(len(z_scan), len(x_scan)))
+    if visualize:
 
-    #Plotting
-    plt.figure(figsize=(10, 8))
+        print("Shape of display_image:", display_image.shape)
+        print("Expected shape: (len(z_scan), len(x_scan)) = ({}, {})".format(len(z_scan), len(x_scan)))
 
-    extent = [x_scan[0] * 1e3, x_scan[-1] * 1e3, z_scan[-1] * 1e3, z_scan[0] * 1e3]
+        #Plotting
+        plt.figure(figsize=(10, 8))
 
-    im = plt.imshow(display_image, extent=extent, cmap='gray', origin='upper', vmin=0, vmax=1)
-    plt.xlabel('Lateral (mm)') # Corrected label
-    plt.ylabel('Axial/Depth (mm)')   # Corrected label
-    plt.title('Simulated Ultrasound B-mode Image')
-    plt.colorbar(im, label='Relative Echo Intensity (Normalized)')
-    plt.gca().invert_yaxis() # This is crucial to have depth increase downwards
-    plt.tight_layout()
-    plt.show()
+        extent = [x_scan[0] * 1e3, x_scan[-1] * 1e3, z_scan[-1] * 1e3, z_scan[0] * 1e3]
 
-    # Debugging
-    print("Raw envelope min:", np.min(d_envelope_raw), "max:", np.max(d_envelope_raw))
-    print("Log values min:", np.min(bmode_db), "max:", np.max(bmode_db))
-    print("After dynamic range min:", np.min(bmode_db_clipped), "max:", np.max(bmode_db_clipped))
-    print("Display image min:", np.min(display_image), "max:", np.max(display_image))
+        im = plt.imshow(display_image, extent=extent, cmap='gray', origin='upper', vmin=0, vmax=1)
+        plt.xlabel('Lateral (mm)') # Corrected label
+        plt.ylabel('Axial/Depth (mm)')   # Corrected label
+        plt.title('Simulated Ultrasound B-mode Image')
+        plt.colorbar(im, label='Relative Echo Intensity (Normalized)')
+        plt.gca().invert_yaxis() # This is crucial to have depth increase downwards
+        plt.tight_layout()
+        plt.show()
+
+        # Debugging
+        print("Raw envelope min:", np.min(d_envelope_raw), "max:", np.max(d_envelope_raw))
+        print("Log values min:", np.min(bmode_db), "max:", np.max(bmode_db))
+        print("After dynamic range min:", np.min(bmode_db_clipped), "max:", np.max(bmode_db_clipped))
+        print("Display image min:", np.min(display_image), "max:", np.max(display_image))
+
+    if return_grad_tensors:
+        return scene, channel_3d
+    else: 
+        return scene, display_image
 
 
-    return scene, display_image
 
-
-scene, display_image = us_render()
-
-
-### Automatic Differentiation
-initial_image = display_image
-
-# Choose Parameters we want to optimize
+# build once
+scene = mi.load_dict(scene_dict)
+integrator = scene.integrator()           # reuse this guy
 params = mi.traverse(scene)
-print(params.keys())
+_, ref_image_np =  us_render(scene, return_grad_tensors=False, visualize=True)
 
-opt_key = 'shape.bsdf.roughness'
+def forward(rough):
+    # patch the scene once
+    params['shape.bsdf.roughness'] = rough
+    params.update()
 
-# Save original value
-param_ref = params[opt_key]
+    # run the simulation
+    _, bmode_np = us_render(scene, return_grad_tensors=False, visualize=False)
+    return bmode_np
 
-# Change value and update
-params[opt_key] = 0.1
-params.update()
+# reference image (NumPy)
+target = ref_image_np            # e.g. saved from first render
+def loss_fn(bmode):
+    return np.mean((bmode - target)**2)
+
+rough = 0.5            # initial guess
+lr    = 2e-2           # manual step size
+loss = []
+for it in range(3):
+    eps = 1e-3
+    f0  = loss_fn(forward(rough))
+    f1  = loss_fn(forward(rough + eps))
+    grad = (f1 - f0) / eps        # ∂L/∂rough (scalar)
+
+    rough -= lr * grad            # SGD step
+    rough = np.clip(rough, 1e-4, 1.0)
+
+    print(f"iter {it}: loss={f0:.4g}, rough={rough:.4f}")
+    loss.append(f0)
+
+plt.plot(loss)
+plt.xlabel('Iteration'); plt.ylabel('Loss'); plt.title('Loss versus Iter.');
+plt.show()
+
+
+'''
+# Copy and cut gradients
+ref_tensor = dr.detach(ref_raw)
+dr.eval(ref_tensor)
 
 # Setting up optimizer
 opt = mi.ad.Adam(lr=0.05)
@@ -279,46 +305,47 @@ opt[opt_key] = params[opt_key]
 
 # Helper function for MSE of image to ref image
 def mse(image):
-    return dr.mean(dr.square(image - initial_image))
+    return dr.mean(dr.square(image - ref_tensor))
 
-iteration_count = 5
+# ---------- hyper-parameters ----------
+lr        = 5e-2          # learning rate
+n_iter    = 5
+lower, upper = 1e-4, 1.0  # clamp range
+# --------------------------------------
 
-# Gradient descent
 errors = []
-for it in range(iteration_count):
-    # Update scene state
-    params.update(opt)
+for it in range(n_iter):
+    # 1) push current value into the scene
+    params.update()
 
-    # Render image
-    scene, image = us_render()
+    # 2) forward pass
+    _, img = us_render(scene, return_grad_tensors=True)
 
-    # Evaluate losee function
-    loss = mse(image)
-
-    # np to dr
-    loss = dr.llvm.Float(loss)
-
-    # Backwardspropigate through the rendering process
+    # 3) loss & backward
+    loss = dr.mean(dr.square(img - ref_tensor))
     dr.backward(loss)
 
-    # Optimizer step
-    opt.step()
+    # 4) *evaluate* and *detach* the gradient
+    g_sym = params[opt_key].grad          # symbolic gradient
+    dr.eval(g_sym)
+    g = dr.detach(g_sym)                  # cut all graph links
 
-    # Ensure opt variable stays clamped
-    opt[opt_key] = dr.clip(opt[opt_key], 0.0001, 1)
+    # 5) SGD update
+    params[opt_key] -= lr * g
+    params[opt_key]  = dr.clamp(params[opt_key], lower, upper)
 
+    # 6) bookkeeping
+    errors.append(float(loss))
+    print(f"iter {it}: loss={float(loss):.4g}, rough={float(params[opt_key]):.4f}")
 
+print("optimisation finished")
 
-    # Track the difference between current and reference
-    err_ref = dr.sum(dr.square(param_ref - params[opt_key]))
-
-    print(f"Iteration {it:02d}: parameter error = {err_ref}", end='\r')
-    errors.append(dr.slice(err_ref))
-print('\nOptimization complete.')
 
 plt.plot(errors)
 plt.xlabel('Iteration'); plt.ylabel('MSE(param)'); plt.title('Parameter error plot');
 plt.show()
+'''
+
 
 
 

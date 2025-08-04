@@ -1,6 +1,9 @@
 import mitsuba as mi
 import drjit as dr
 import numpy as np
+import math
+import threading
+import os
 
 
 
@@ -40,6 +43,8 @@ class UltraIntegrator(mi.SamplingIntegrator):
         # New: Buffer to store initial transmission delays
         self.transmission_delays_buf = dr.zeros(mi.Float, self.n_angles * self.n_elements)
 
+        self.ray_count = 0
+
 
     #Not sure
     def sample(self, scene, sampler, ray, medium, active=True):
@@ -65,7 +70,6 @@ class UltraIntegrator(mi.SamplingIntegrator):
         self.channel_buf = dr.zeros(mi.Float, n_angles_scalar * n_elements_scalar * time_samples_scalar)
         self.transmission_delays_buf = dr.zeros(mi.Float, n_angles_scalar * n_elements_scalar)
 
-        
 
         for angle_idx_val in range(n_angles_scalar):
             angle_id_outer = mi.UInt32(angle_idx_val)
@@ -198,6 +202,7 @@ class UltraIntegrator(mi.SamplingIntegrator):
 
                     new_dir = si.to_world(bs.wo)
                     ray = si.spawn_ray(dr.normalize(new_dir))
+                    self.ray_count += 1
 
                     geo_len += distance
                     depth += 1
@@ -221,4 +226,164 @@ class UltraIntegrator(mi.SamplingIntegrator):
                 amp, atten, tof, geo_len, depth, ray, active_ray = dr.while_loop(state, cond, body)
 
         print(f"Simulation complete. Channel buffer populated. Transmission delays stored.")
+        print(f"{self.ray_count} spawned in simulation")
         return True #Returning True?
+    
+    
+    def simulate_acquisition_parallel(self, scene):
+        # initialize values
+        n_angles_scalar = int(self.n_angles)
+        n_elements_scalar = int(self.n_elements)
+        fs_scalar = float(self.fs)
+        c_scalar = float(self.sound_speed)
+        pitch_scalar = float(self.pitch)
+        time_samples_scalar = int(self.time_samples)
+        num_rays = n_angles_scalar * n_elements_scalar
+
+        # Angles and element x-positions
+        angles_deg = np.linspace(-30, 30, 25, dtype=np.float32)
+        angles_rad = np.deg2rad(angles_deg)
+        elem_x = pitch_scalar * (np.arange(n_elements_scalar, dtype=np.float32) - (n_elements_scalar-1) /2)
+
+        # Cartesian product: every (angle. element) pair
+        ang_grid, elem_grid = np.meshgrid(angles_rad, elem_x, indexing='ij')
+
+        # Transmission delays for all rays in one vector
+        tx_delay = (elem_grid * np.sin(ang_grid)) / c_scalar
+
+        # Flatten once so we can pass 1-D blocks to each worker
+        self.transmission_delays_buf = tx_delay.astype(np.float32).ravel()   # <-- NEW
+
+        # final receive buffer
+        self.channel_buf = np.zeros((n_angles_scalar, n_elements_scalar, time_samples_scalar), dtype=np.float32)
+
+        def _trace_single_ray(angle_idx, elem_idx):
+
+            # Geometry
+            a_rad = float(ang_grid[angle_idx, elem_idx])
+            x_elem = float(elem_x[elem_idx])
+            t0 = float(tx_delay[angle_idx, elem_idx])
+
+            # Build primary ray
+            origin = mi.Point3f(x_elem, 0, 0) 
+            direction = mi.Vector3f(math.sin(a_rad), 0, math.cos(a_rad)) # Use outer variable
+            sensor_T = scene.sensors()[0].transform
+            ray = mi.Ray3f(sensor_T @ origin, dr.normalize(sensor_T @ direction))
+
+            # Pre-ray state
+            amp = 1.0
+            atten = 1.0
+            tof = 0.0
+            geo_len = 0.0
+            depth = 0
+            active = True
+
+            rng = np.random.default_rng()
+
+            
+            def directivity_weight_o(wo, n, N):
+                return (dr.dot(wo,n)) / N
+
+            def directivity_weight_i(wi, alpha_m, alpha_c):
+
+                #Weighting rfom the paper
+                trans_normal_world = dr.normalize(sensor_T @ mi.Vector3f(0, 0, 1))
+                wi = -wi
+                dot = dr.dot(trans_normal_world, wi)
+                alpha = dr.abs(dr.acos(dot))
+
+                mid_cond = (alpha_c - alpha) / (alpha_c - alpha_m)
+
+                weight = dr.select(alpha <= alpha_m, 1.0,
+                                    dr.select(alpha <= alpha_c,
+                                            mid_cond,
+                                            0.0))
+
+                return weight
+            
+
+            while (active and depth < self.max_depth and geo_len < 0.2):
+
+                si = scene.ray_intersect(ray, active)
+
+                if not si.is_valid():
+                    break
+
+                distance = 1#dr.value_t(si.t)
+                geo_len += distance
+                tof += distance / c_scalar
+
+                # Randomly picks recieving element
+                recv_idx = rng.integers(0, n_elements_scalar, dtype=np.int32)
+                target = mi.Point3f(float(elem_x[recv_idx]), 0.0, 0.0)
+                target_w = sensor_T @ target # target in world frame
+                sec_dir = dr.normalize(target_w - si.p)
+
+                vis_si = scene.ray_intersect(si.spawn_ray(sec_dir), active)
+                visible = not vis_si.is_valid()
+
+                # attenuation and phase
+                atten *= math.exp(-self.attenuation * self.frequency * 1e-6 * distance / 8.686)
+                total_time = (t0 + tof + (dr.norm(target_w - si.p)) / c_scalar)
+                phase = 2.0 * math.pi * self.frequency * total_time
+
+                # BSDF sample / amplitude
+                ctx = mi.BSDFContext()
+                bsdf = si.bsdf()
+
+                # 2 uniform samples
+                s1, s2 = rng.random(2, dtype=np.float32)
+                bs, a_resp = bsdf.sample(ctx, si, dr.full(mi.Float, s1), dr.full(mi.Float, s2), active) # May need to be fixed
+                
+                cos_theta = dr.dot(si.sh_frame.n, -ray.d)
+                amp *= a_resp * cos_theta / max(bs.pdf, 1e-6)
+
+                # directibity factor
+                fd = (directivity_weight_i(sec_dir, dr.deg2rad(self.main_beam_angle), dr.deg2rad(self.cutoff_angle)) * directivity_weight_o( ray.d , si.sh_frame.n ,num_rays))
+                    
+                # Pressure assembly
+                pressure_scalar = atten * amp * fd * dr.sin(phase)
+
+                # write into channel buffer
+                t_idx = total_time * fs_scalar
+                if 0 <= t_idx < time_samples_scalar and visible:
+                    self.channel_buf[angle_idx, recv_idx, t_idx] += pressure_scalar
+
+
+                # Spawn bounce
+                new_dir = si.to_world(bs.wo)
+                ray = si.spawn_ray(dr.normalize(new_dir))
+                self.ray_count += 1
+                depth += 1
+
+                # Russian Roulette termination
+                rr_prob = min(abs(atten * amp[0]), 1.0)
+                if rng.random() > rr_prob:
+                    break
+                atten /= rr_prob # unbaised
+
+
+        # --------------- launch threads ---------------------------
+        n_threads = min(n_angles_scalar * n_elements_scalar, 20) #os.cpu_count())
+        threads   = []
+
+        for a in range(n_angles_scalar):
+            for e in range(n_elements_scalar):
+                th = threading.Thread(target=_trace_single_ray, args=(a, e))
+                th.start()
+                threads.append(th)
+
+        for th in threads:
+            th.join()
+
+        print("Simulation complete - traced",
+            n_angles_scalar * n_elements_scalar, "primary rays")
+        print("Channel buffer shape:", self.channel_buf.shape)
+        return True
+
+
+    def traverse(self, callback):
+        callback.put_parameter('pitch', self.pitch, mi.ParamFlags.Differentiable)
+
+    def parameters_changed(self, keys):
+        pass
