@@ -4,7 +4,9 @@ import numpy as np
 import math
 import threading
 import os
-
+import tqdm
+from concurrent.futures import ThreadPoolExecutor
+import queue, threading, os
 
 
 class UltraIntegrator(mi.SamplingIntegrator):
@@ -241,7 +243,7 @@ class UltraIntegrator(mi.SamplingIntegrator):
         num_rays = n_angles_scalar * n_elements_scalar
 
         # Angles and element x-positions
-        angles_deg = np.linspace(-30, 30, 25, dtype=np.float32)
+        angles_deg = np.linspace(-10, 10, n_angles_scalar, dtype=np.float32)
         angles_rad = np.deg2rad(angles_deg)
         elem_x = pitch_scalar * (np.arange(n_elements_scalar, dtype=np.float32) - (n_elements_scalar-1) /2)
 
@@ -309,8 +311,8 @@ class UltraIntegrator(mi.SamplingIntegrator):
                 if not si.is_valid():
                     break
 
-                distance = 1#dr.value_t(si.t)
-                geo_len += distance
+                distance = (si.t).numpy()
+                geo_len += distance[0]
                 tof += distance / c_scalar
 
                 # Randomly picks recieving element
@@ -346,6 +348,7 @@ class UltraIntegrator(mi.SamplingIntegrator):
 
                 # write into channel buffer
                 t_idx = total_time * fs_scalar
+                t_idx = int(round(t_idx[0]))
                 if 0 <= t_idx < time_samples_scalar and visible:
                     self.channel_buf[angle_idx, recv_idx, t_idx] += pressure_scalar
 
@@ -359,22 +362,40 @@ class UltraIntegrator(mi.SamplingIntegrator):
                 # Russian Roulette termination
                 rr_prob = min(abs(atten * amp[0]), 1.0)
                 if rng.random() > rr_prob:
-                    break
+                    survive = False
                 atten /= rr_prob # unbaised
+
+                trans_norm_world = dr.normalize(sensor_T @ mi.Vector3f(0, 0, 1))
+                cos_min = dr.cos(dr.deg2rad(self.cutoff_angle))
+                within_angle = dr.dot(ray.d, trans_norm_world) >= cos_min
+                path_ok = geo_len < 0.2
+                depth_ok = depth < self.max_depth
+                
+
+                active &= within_angle & path_ok & depth_ok & survive
 
 
         # --------------- launch threads ---------------------------
-        n_threads = min(n_angles_scalar * n_elements_scalar, 20) #os.cpu_count())
-        threads   = []
 
-        for a in range(n_angles_scalar):
-            for e in range(n_elements_scalar):
-                th = threading.Thread(target=_trace_single_ray, args=(a, e))
-                th.start()
-                threads.append(th)
+        BLOCK = 16                                 # rays per task
+        max_t = min(os.cpu_count(), 10)            # adjust as needed
+        bar = tqdm.tqdm(total=n_angles_scalar*n_elements_scalar, unit="ray")
 
-        for th in threads:
-            th.join()
+        def worker(block):
+            for (ai, ei) in block:
+                _trace_single_ray(ai, ei)
+            bar.update(len(block))
+
+        # build list of (angle, elem) tuples
+        jobs = [(a, e) for a in range(n_angles_scalar)
+                    for e in range(n_elements_scalar)]
+
+        # split into blocks of BLOCK
+        blocks = [jobs[i:i+BLOCK] for i in range(0, len(jobs), BLOCK)]
+
+        with ThreadPoolExecutor(max_workers=max_t) as pool:
+            pool.map(worker, blocks)
+        bar.close()
 
         print("Simulation complete - traced",
             n_angles_scalar * n_elements_scalar, "primary rays")

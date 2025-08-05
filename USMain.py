@@ -38,7 +38,7 @@ scene_dict = {
         'n_elements': 64, # Keep low for faster debugging
         'pitch': 0.00003 * 4,
         'time_samples': 10000, # Keep large enough
-        'angles': dr.linspace(mi.Float, -10, 10, 5) # Keep low for faster debugging
+        'angles': dr.linspace(mi.Float, -10, 10, 50) # Keep low for faster debugging
     },
         'sensor': {
         'type': 'ultrasound_sensor',
@@ -95,12 +95,12 @@ def us_render(scene, return_grad_tensors = False, visualize = False):
 
     # Call the custom simulation method on the integrator
     print("Starting Mitsuba custom acquisition simulation...")
-    integrator.simulate_acquisition(scene) # This replaces mi.render(scene)
+    integrator.simulate_acquisition_parallel(scene) # This replaces mi.render(scene)
     print("Mitsuba custom acquisition simulation finished.")
 
     # Retrieve data after simulation
-    channel_buf = integrator.channel_buf.numpy()
-    transmission_delays_flat = integrator.transmission_delays_buf.numpy()
+    channel_buf = integrator.channel_buf #.numpy()
+    transmission_delays_flat = integrator.transmission_delays_buf #.numpy()
 
     n_angles = integrator.n_angles
     n_elements = integrator.n_elements
@@ -247,10 +247,8 @@ def us_render(scene, return_grad_tensors = False, visualize = False):
         print("After dynamic range min:", np.min(bmode_db_clipped), "max:", np.max(bmode_db_clipped))
         print("Display image min:", np.min(display_image), "max:", np.max(display_image))
 
-    if return_grad_tensors:
-        return scene, channel_3d
-    else: 
-        return scene, display_image
+
+    return scene, display_image
 
 
 
