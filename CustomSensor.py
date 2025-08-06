@@ -2,7 +2,7 @@ import mitsuba as mi
 import drjit as dr
 import numpy as np
 
-#mi.set_variant("llvm_ad_mono")
+mi.set_variant("llvm_ad_mono")
 
 class CustomSensor(mi.Sensor):
     def __init__(self, props):
@@ -28,15 +28,19 @@ class CustomSensor(mi.Sensor):
 
     def put_data(self, ray: mi.Ray3f, amplitude: float, active=True):
 
+        x = ray.o.x.numpy()
+        x_numpy = x.item()
+
 
         #Map the x poisiton to the element index
-        idx = int(np.round(float(ray.o.x) / self.pitch + self.number_of_elements / 2))
+        idx = int(np.round(x_numpy / self.pitch + self.number_of_elements / 2))
 
         #Compute the time of flight in seconds
-        t = ray.time
+        t = ray.time.numpy()
+        t_numpy = t.item()
 
         #Convert the time of flight to sample index
-        index = int(np.round(t * self.sample_rate))
+        index = int(np.round(t_numpy * self.sample_rate))
 
         #Cosine weighting for directivity
         direction = dr.normalize(-ray.d)
@@ -47,10 +51,12 @@ class CustomSensor(mi.Sensor):
         gain = dr.maximum(0.0, dr.dot(direction, normal))
 
         weighted_amplitude = amplitude * gain
+        amplitude_np = weighted_amplitude.numpy()
+        amp = amplitude_np.item()
 
         #Bounds check
         if 0 <= idx < self.number_of_elements and 0 <= index < self.time_samples:
-            self.channel_buffer[idx, index] += weighted_amplitude
+            self.channel_buffer[idx, index] += amp
 
     def channel_data(self):
         return self.channel_buffer
@@ -70,7 +76,7 @@ class CustomSensor(mi.Sensor):
         self.channel_buffer = np.zeros((self.number_of_elements, self.time_samples), dtype=np.float32)
 
 
-'''
+
 
 props = mi.Properties("custom")
 props["number_of_elements"] = 5
@@ -110,4 +116,3 @@ plt.xlabel("Time")
 plt.ylabel("Element")
 plt.colorbar()
 plt.show()
-'''
