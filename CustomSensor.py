@@ -77,7 +77,7 @@ class CustomSensor(mi.Sensor):
 
 
 
-
+'''
 props = mi.Properties("custom")
 props["number_of_elements"] = 5
 props["pitch"] = 1.0
@@ -116,3 +116,4 @@ plt.xlabel("Time")
 plt.ylabel("Element")
 plt.colorbar()
 plt.show()
+'''
