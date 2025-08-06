@@ -243,7 +243,7 @@ class UltraIntegrator(mi.SamplingIntegrator):
         num_rays = n_angles_scalar * n_elements_scalar
 
         # Angles and element x-positions
-        angles_deg = np.linspace(-10, 10, n_angles_scalar, dtype=np.float32)
+        angles_deg = self.angles
         angles_rad = np.deg2rad(angles_deg)
         elem_x = pitch_scalar * (np.arange(n_elements_scalar, dtype=np.float32) - (n_elements_scalar-1) /2)
 
@@ -313,7 +313,7 @@ class UltraIntegrator(mi.SamplingIntegrator):
 
                 distance = (si.t).numpy()
                 geo_len += distance[0]
-                tof += distance / c_scalar
+                tof += distance[0]  / c_scalar
 
                 # Randomly picks recieving element
                 recv_idx = rng.integers(0, n_elements_scalar, dtype=np.int32)
@@ -338,7 +338,8 @@ class UltraIntegrator(mi.SamplingIntegrator):
                 bs, a_resp = bsdf.sample(ctx, si, dr.full(mi.Float, s1), dr.full(mi.Float, s2), active) # May need to be fixed
                 
                 cos_theta = dr.dot(si.sh_frame.n, -ray.d)
-                amp *= a_resp * cos_theta / max(bs.pdf, 1e-6)
+                amp *= a_resp * cos_theta * max(bs.pdf, 1e-6)
+                
 
                 # directibity factor
                 fd = (directivity_weight_i(sec_dir, dr.deg2rad(self.main_beam_angle), dr.deg2rad(self.cutoff_angle)) * directivity_weight_o( ray.d , si.sh_frame.n ,num_rays))
@@ -376,10 +377,11 @@ class UltraIntegrator(mi.SamplingIntegrator):
 
 
         # --------------- launch threads ---------------------------
-
         BLOCK = 16                                 # rays per task
-        max_t = min(os.cpu_count(), 10)            # adjust as needed
+        max_t = min(os.cpu_count(), 45)            # adjust as needed
         bar = tqdm.tqdm(total=n_angles_scalar*n_elements_scalar, unit="ray")
+
+        print(f"Simulating with {max_t} workers")
 
         def worker(block):
             for (ai, ei) in block:

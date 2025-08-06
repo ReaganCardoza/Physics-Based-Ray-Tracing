@@ -27,7 +27,7 @@ scene_dict = {
     'type': 'scene',
     'integrator': {
         'type': 'ultrasound_integrator',
-        'max_depth': 100, # Keep at 1 for simpler debugging
+        'max_depth': 10, # Keep at 1 for simpler debugging
         'sampling_rate': 50e6,
         'frequency': 5e6,
         'sound_speed': 1540,
@@ -38,7 +38,7 @@ scene_dict = {
         'n_elements': 64, # Keep low for faster debugging
         'pitch': 0.00003 * 4,
         'time_samples': 10000, # Keep large enough
-        'angles': dr.linspace(mi.Float, -10, 10, 50) # Keep low for faster debugging
+        'angles': dr.linspace(mi.Float, -15, 15, 5) # Keep low for faster debugging
     },
         'sensor': {
         'type': 'ultrasound_sensor',
@@ -272,10 +272,10 @@ target = ref_image_np            # e.g. saved from first render
 def loss_fn(bmode):
     return np.mean((bmode - target)**2)
 
-rough = 0.5            # initial guess
+rough = 0.1            # initial guess
 lr    = 2e-2           # manual step size
 loss = []
-for it in range(3):
+for it in range(25):
     eps = 1e-3
     f0  = loss_fn(forward(rough))
     f1  = loss_fn(forward(rough + eps))
@@ -287,10 +287,14 @@ for it in range(3):
     print(f"iter {it}: loss={f0:.4g}, rough={rough:.4f}")
     loss.append(f0)
 
-plt.plot(loss)
-plt.xlabel('Iteration'); plt.ylabel('Loss'); plt.title('Loss versus Iter.');
-plt.show()
+#def optimize(opt_param, itr, lr, ig, min_val, max_val):
+    
 
+#plt.plot(loss)
+#plt.xlabel('Iteration'); plt.ylabel('Loss'); plt.title('Loss versus Iter.');
+#plt.show()
+
+print(f"Final Roughness Value: {rough}")
 
 '''
 # Copy and cut gradients
