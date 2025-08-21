@@ -1,113 +1,191 @@
 import mitsuba as mi
+
 import drjit as dr
-import numpy as np
 
-#mi.set_variant("llvm_ad_mono")
 
-class CustomSensor(mi.Sensor):
+
+#mi.set_variant("cuda_ad_mono")
+
+
+
+class UltraSensor(mi.Sensor):
+
     def __init__(self, props):
+
         super().__init__(props)
 
-        #Transudcer Geometry Configuration
-        self.number_of_elements = props.get("number_of_elements", 128)
-        self.pitch = props.get("pitch", 0.0003)
-        self.element_width = props.get("element_width", 0.00027) #Not used but could be for aperature effects
-        self.element_height = props.get("element_height", 0.005)
-
-        #Signal Acquisition Settings
-        #Sample RAte is the time resolution of the acquisiton in Hz
-        self.sample_rate = props.get("sample_rate", 50e6)
-        self.speed_of_sound = props.get("speed_of_sound", 1540.0)
-
-        #Buffer Settings
-        #Shape of the rd buffer in number elements, time samples
-        self.time_samples = props.get("time_samples", 3000)
 
 
-        self.channel_buffer = np.zeros((self.number_of_elements, self.time_samples), dtype=np.float32)
+        # Geometry parameters
 
-    def put_data(self, ray: mi.Ray3f, amplitude: float, active=True):
+        self.num_elements_lateral = props.get('num_elements_lateral', 128)  # Transducer elements
+
+        self.element_width = props.get('elements_width', 0.003)
+
+        self.element_height = props.get('elements_height', 0.01)
+
+        self.pitch = props.get('pitch', 0.00035)
+
+        self.radius = props.get('radius', dr.inf)
 
 
-        #Map the x poisiton to the element index
-        idx = int(np.round(float(ray.o.x) / self.pitch + self.number_of_elements / 2))
 
-        #Compute the time of flight in seconds
-        t = ray.time
+        # Emission properties
 
-        #Convert the time of flight to sample index
-        index = int(np.round(t * self.sample_rate))
+        self.center_frequency = props.get('center_frequency', 5e6) # 5 MHz center frequency
 
-        #Cosine weighting for directivity
-        direction = dr.normalize(-ray.d)
+        self.sound_speed = props.get('sound_speed', 1540) # m/s
 
-        #Normal direction for a linear transducer not currently handling a convex transducer
-        normal = mi.Vector3f(0.0, 0.0, 1.0)
 
-        gain = dr.maximum(0.0, dr.dot(direction, normal))
 
-        weighted_amplitude = amplitude * gain
+        # Transform
 
-        #Bounds check
-        if 0 <= idx < self.number_of_elements and 0 <= index < self.time_samples:
-            self.channel_buffer[idx, index] += weighted_amplitude
+        to_world_prop = props.get('to_world', mi.ScalarTransform4f())
 
-    def channel_data(self):
-        return self.channel_buffer
+        if hasattr(to_world_prop, 'matrix'):
 
-    def clear(self):
-        self.channel_buffer = np.zeros((self.number_of_elements, self.time_samples), dtype=np.float32)
+            self.transform = mi.Transform4f(to_world_prop.matrix)
+
+        else:
+
+            self.transform = to_world_prop
+
+
+
+        # Store emission time for phase reference
+
+        self.emission_time = mi.Float(0)
+
+
+
+        # For reception sensitivity
+
+        self.directivity = props.get('directivity', 1.0)
+
+
+
+
+
+
+
+
+
+
+
+
+    def sample_ray(self, time, wavelength_sample, position_sample, aperture_sample, active=True):
+
+        # Store emission time for phase reference
+
+        self.emission_time = time
+
+
+
+        # element positions (for linear array)
+
+        element_index = dr.minimum(dr.floor(position_sample.x * self.num_elements_lateral), self.num_elements_lateral -1)
+
+
+
+        # Calculate element posiitons based on array geometry
+
+        if dr.isinf(self.radius):   # Linear Array
+
+            total_width_array = (self.num_elements_lateral - 1) * self.pitch
+
+            start_x = -total_width_array / 2
+
+            element_x = start_x + element_index * self.pitch
+
+            element_z = 0.0
+
+        else: #Convex array
+
+            theta_element = (element_index - self.num_elements_lateral / 2) * (self.pitch / self.radius)
+
+            element_x = self.radius * dr.sin(theta_element)
+
+            element_z = self.radius * (1 - dr.cos(theta_element))
+
+
+
+        # Random offsets within element
+
+        offset_x = (aperture_sample.x - 0.5) * self.element_width
+
+        offset_y = (aperture_sample.y - 0.5) * self.element_height
+
+
+
+        # local origin
+
+        origin_local = mi.Point3f(element_x + offset_x, offset_y, element_z)
+
+
+
+        # 3D Directional sampling 
+
+        if hasattr(mi.warp, 'square_to_uniform_hemisphere'):
+
+            # Sample forward hemisphere for realistic ultrasound beam pattern
+
+            direction_local = mi.warp.square_to_uniform_hemisphere(aperture_sample)
+
+        else:
+
+            # Fall back to manual spherical coordinates
+
+            phi = position_sample.y * 2 * dr.pi
+
+            cos_theta = wavelength_sample
+
+            theta = dr.acos(cos_theta)
+
+
+
+            sin_theta = dr.sin(theta)
+
+            direction_local = mi.Vector3f(sin_theta * dr.cos(phi),
+
+                                          sin_theta * dr.sin(phi),
+
+                                          cos_theta) # Forward hemisphere (positive Z)
+
+
+
+        # Transform to world
+
+        origin_world = self.transform @ origin_local
+
+        direction_world = dr.normalize(self.transform @ direction_local)
+
+
+
+        # Phase
+
+        phase = 2 * dr.pi * self.center_frequency * time
+
+
+
+        # Directivity weighting
+
+        cos_beam_angle = direction_local.z
+
+        directivity_weight = dr.abs(cos_beam_angle) * self.directivity
+
+
+
+
+
+        weight = dr.cos(2 * dr.pi * self.center_frequency * time) * directivity_weight
+
+        return mi.Ray3f(origin_world, direction_world), weight
+
+
+
+
 
     def traverse(self, callback):
-        callback.put_parameters("number_of_elements", self.number_of_elements)
-        callback.put_parameters("pitch", self.pitch)
-        callback.put_parameters("element_width", self.element_width)
-        callback.put_parameters("element_height", self.element_height)
-        callback.put_parameters("sample_rate", self.sample_rate)
-        callback.put_parameters("speed_of_sound", self.speed_of_sound)
-
-    def parameters(self, keys):
-        self.channel_buffer = np.zeros((self.number_of_elements, self.time_samples), dtype=np.float32)
 
 
-'''
-
-props = mi.Properties("custom")
-props["number_of_elements"] = 5
-props["pitch"] = 1.0
-props["sample_rate"] = 10.0
-props["time_samples"] = 20  # 5 elements, 20 time samples
-
-sensor = CustomSensor(props)
-
-test_rays = [
-    mi.Ray3f(o=[-2.0, 0, 0], d=[0, 0, -1], time=1.0),
-    mi.Ray3f(o=[0.0, 0, 0],  d=[0, 0, -1], time=1.5),
-    mi.Ray3f(o=[2.0, 0, 0],  d=[0, 0.8, -1], time=0.5),
-    mi.Ray3f(o=[10.0, 0, 0], d=[0, 0, -1], time=1.0),
-]
-
-amplitudes = [1.0, 2.0, 1.0, 3.0]
-
-
-for ray, amp in zip(test_rays, amplitudes):
-    sensor.put_data(ray, amp)
-
-buffer = sensor.channel_data()
-
-print("\n=== Channel Buffer ===")
-print(buffer)
-
-print("\n=== Non-zero Entries ===")
-nonzeros = np.argwhere(buffer > 0)
-for idx, t_idx in nonzeros:
-    print(f"Element {idx}, Time {t_idx}, Value: {buffer[idx, t_idx]:.4f}")
-
-import matplotlib.pyplot as plt
-
-plt.imshow(sensor.channel_data(), aspect="auto", cmap="plasma")
-plt.xlabel("Time")
-plt.ylabel("Element")
-plt.colorbar()
-plt.show()
-'''
+        pass

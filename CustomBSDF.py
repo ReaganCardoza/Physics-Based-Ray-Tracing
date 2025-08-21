@@ -2,7 +2,7 @@ import mitsuba as mi
 import numpy as np
 import drjit as dr
 
-#mi.set_variant("cuda_ad_mono")
+#mi.set_variant("llvm_ad_rgb")
 
 class UltraBSDF(mi.BSDF):
     def __init__(self, props):
@@ -17,6 +17,9 @@ class UltraBSDF(mi.BSDF):
         if props.has_property('roughness'):
             self.roughness = mi.Float(props['roughness'])
 
+        self.pdf_max = mi.Float(0.2)
+        if props.has_property('pdf_max'):
+            self.pdf_max = mi.Float(props['pdf_max'])
         
         # Set Appropriate flags
         reflection_flags = mi.BSDFFlags.DeltaReflection | mi.BSDFFlags.FrontSide | mi.BSDFFlags.BackSide
@@ -27,64 +30,46 @@ class UltraBSDF(mi.BSDF):
 
 
     
-    def _ggx_sample(self, wi_world, n_world, sample):
-        # Local incident direction
+    def _ggx_sample(self, wi_world, n_world, sample_2d: mi.Point2f):
         frame = mi.Frame3f(n_world)
         wi = frame.to_local(wi_world)
         alpha = self.roughness
 
-        # Stretch view vector
         wi_stretched = mi.Vector3f(alpha * wi.x, alpha * wi.y, wi.z)
         wi_stretched = dr.normalize(wi_stretched)
 
-        # Orthoginal basis around wi stretched
         inv_len = dr.rsqrt(dr.maximum(1.0 - wi_stretched.z * wi_stretched.z, 1e-7))
-        T1 = mi.Vector3f(wi_stretched.y * inv_len,
-                         -wi_stretched.x * inv_len,
-                         0.0)
+        T1 = mi.Vector3f(wi_stretched.y * inv_len, -wi_stretched.x * inv_len, 0.0)
         T2 = dr.cross(wi_stretched, T1)
 
-        # Sample point on unit disk 
-        d = mi.warp.square_to_uniform_disk_concentric(sample)
+        # ✅ needs a 2D sample
+        d = mi.warp.square_to_uniform_disk_concentric(sample_2d)
 
-        # Stretching compensation
         S = 0.5 * (1.0 + wi_stretched.z)
-        d.y = (1.0 - S) * dr.sqrt(dr.maximum(1.0 - d.x * d.x, 0.0)) + S * d.y
+        d_y_sq = dr.maximum(1.0 - d.x * d.x, 0.0)
+        d.y = (1.0 - S) * dr.sqrt(d_y_sq) + S * d.y
 
-        # Convert slopes to normal, then unstretch
         m_stretched = d.x * T1 + d.y * T2 + dr.sqrt(dr.maximum(1.0 - d.x * d.x - d.y * d.y, 0.0)) * wi_stretched
-        m = mi.Vector3f(alpha * m_stretched.x,
-                        alpha * m_stretched.y,
-                        m_stretched.z)
-        m = dr.normalize(m)
+        m = mi.Vector3f(alpha * m_stretched.x, alpha * m_stretched.y, m_stretched.z)
+        return dr.normalize(m)
 
-        return m
     
 
-    def ggx_pdf(self, theta, alpha):
-        """
-        Compute the GGX PDF for a given angle and roughness parameter.
-        
-        Parameters:
-        - theta (float or np.ndarray): Angle(s) in degrees.
-        - alpha (float): Roughness parameter.
-        
-        Returns:
-        - pdf (float or np.ndarray): PDF value(s).
-        """
-        theta_rad = dr.deg2rad(theta)
-        cos_theta = dr.cos(theta_rad)
-        sin_theta = dr.sin(theta_rad)
-        denom = (alpha**2 - 1) * cos_theta**2 + 1
-        D = alpha**2 / (dr.pi * denom**2)  # GGX normal distribution
-        pdf = D * sin_theta  # Include solid angle term
-        pdf_max = 0.2386683650839149 # dr.max(pdf)  # Normalize for plotting (approximate)
-        pdf = pdf_max / pdf_max
-        return pdf 
+    def ggx_pdf(self, cos_theta, alpha, pdf_max):
+        # cos_theta in [-1, 1]
+        cos_theta = dr.clamp(cos_theta, -1.0, 1.0)
+        sin_theta = dr.sqrt(dr.maximum(1.0 - cos_theta * cos_theta, 0.0))
+        a2 = alpha * alpha
+        # No weird Int casts; keep it Float
+        denom = (a2 - 1.0) * (cos_theta * cos_theta) + 1.0
+        D = a2 / (dr.pi * denom * denom)     # NDF
+        pdf = D * sin_theta                  # convert to spherical measure
+        return pdf / dr.maximum(pdf_max, 1e-6)
+
     
 
 
-    def sample(self, ctx, si, sample1, sample2, active = True):
+    def sample(self, ctx, si, sample1, sample2, pdf_max, active = True):
         
         # Directions and angles
         incident_direction = si.wi
@@ -92,7 +77,7 @@ class UltraBSDF(mi.BSDF):
 
 
         # Sample Micro facet normals
-        m = self._ggx_sample(si.wi, si.n, sample1)
+        m = self._ggx_sample(si.wi, si.sh_frame.n, sample1)
 
 
 
@@ -150,7 +135,7 @@ class UltraBSDF(mi.BSDF):
 
         
         # Outgoing direction PDF
-        pdf_m = self.ggx_pdf(cos_wi_m, self.roughness)
+        pdf_m = self.ggx_pdf(cos_wi_m, self.roughness, self.pdf_max)
         pdf_reflect = pdf_m / (4 * dr.abs(cos_wi_m))
         cos_wo_m = dr.dot(transmission_direction, m)
         abs_n_wi = dr.abs(dr.dot(surface_normal, incident_direction))
@@ -184,8 +169,8 @@ class UltraBSDF(mi.BSDF):
         return 0.0, 0.0
     
     def traverse(self, callback):
-        callback.put_parameter('impedance', self.impedance, mi.ParamFlags.Differentiable)
-        callback.put_parameter('roughness', self.roughness, mi.ParamFlags.Differentiable)
+        callback.put('impedance', self.impedance, mi.ParamFlags.Differentiable)
+        callback.put('roughness', self.roughness, mi.ParamFlags.Differentiable)
 
     def parameters_changed(self, keys):
         pass
