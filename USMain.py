@@ -64,20 +64,21 @@ scene_dict = {
         }
     },
 
-       'shape': {
-            'type': 'sphere',
-            'center': [0, 0, 0.01],
-            'radius': 0.005,
-            'bsdf': {
+       'flat_plate': {
+            'type': 'rectangle',
+            'to_world' : mi.ScalarTransform4f().translate([0,0,0.05]) @
+                         mi.ScalarTransform4f().rotate([0,1,0], 45) @
+                         mi.ScalarTransform4f().scale([.17, .17, 0.14]),
+                        'bsdf': {
                 'type': 'ultrasound_bsdf',
                 'impedance': 7.8,
-                'roughness': 0.5
+                'roughness': 0.7
             }
         },
 
         'wall_back': {
             'type': 'rectangle',
-            'to_world' : mi.ScalarTransform4f().translate([0,0,0.03]) @ 
+            'to_world' : mi.ScalarTransform4f().translate([0,0,1]) @
                          mi.ScalarTransform4f().rotate([0,1,0], 180) @
                          mi.ScalarTransform4f().scale([0.05, 0.05, 1]),
                         'bsdf': {
