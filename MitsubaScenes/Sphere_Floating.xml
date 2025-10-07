@@ -1,0 +1,46 @@
+<scene version="2.0.0">
+<integrator type="ultrasound_integrator">
+    <integer name="max_depth" value="10"/>
+    <float name="sampling_rate" value="50000000"/>
+    <float name="frequency" value="3000000"/>
+    <float name="sound_speed" value="1480"/>
+    <float name="attenuation" value="0.1"/>
+    <integer name="wave_cycles" value="5"/>
+    <float name="main_beam_angle" value="24"/>
+    <float name="cutoff_angle" value="30"/>
+    <integer name="n_elements" value="64"/>
+    <float name="pitch" value="0.00012"/>
+    <integer name="time_samples" value="10000"/>
+    <float_array name="angles" value="-15 -7.5 0 7.5 15"/>
+</integrator>
+<sensor type="ultrasound_sensor">
+    <integer name="num_elements_lateral" value="1280"/>
+    <float name="elements_width" value="0.003"/>
+    <float name="elements_height" value="0.01"/>
+    <float name="pitch" value="0.0003"/>
+    <float name="radius" value="inf"/>
+    <float name="center_frequency" value="3000000"/>
+    <float name="sound_speed" value="1480"/>
+    <float name="directivity" value="1.0"/>
+    <transform name="to_world">
+        <lookat origin="0,0,0.0" target="0,0,0.05" up="0,1,0"/>
+    </transform>
+    <film type="hdrfilm">
+        <integer name="width" value="512"/>
+        <integer name="height" value="512"/>
+        <string name="pixel_format" value="luminance"/>
+        <string name="component_format" value="float32"/>
+    </film>
+</sensor>
+
+    <shape type="sphere" id="sphere">
+        <transform name="to_world">
+            <translate x="0" y="0" z="0.08"/>
+            <scale value="0.06"/>
+        </transform>
+        <bsdf type="ultrasound_bsdf">
+            <float name="impedance" value="7.8"/>
+            <float name="roughness" value="0.9"/>
+        </bsdf>
+    </shape>
+</scene>
